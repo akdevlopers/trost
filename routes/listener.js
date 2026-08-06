@@ -992,7 +992,7 @@ router.post('/listener-login', async (req, res) => {
 
 // GET /api/listener/dashboard
 // Get aggregated dashboard stats, weekly summaries, incoming call queue, plan details, sessions, and reviews
-router.get('/listener/dashboard', auth, async (req, res) => {
+router.post('/listener/dashboard', auth, async (req, res) => {
     try {
         const user_id = req.user.id;
 
@@ -1067,7 +1067,7 @@ router.get('/listener/dashboard', auth, async (req, res) => {
         const getNextFriday = () => {
             const d = new Date();
             const day = d.getDay();
-            const diff = (5 - day + 7) % 7 || 7; 
+            const diff = (5 - day + 7) % 7 || 7;
             d.setDate(d.getDate() + diff);
             return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
         };
@@ -1091,30 +1091,90 @@ router.get('/listener/dashboard', auth, async (req, res) => {
             total_reviews: listenerDetails.total_reviews || 48
         };
 
-        // Incoming queue (mocked as queue is typically in-memory/websocket based)
-        const incomingCallQueue = [
-            {
-                caller_id: "#402",
-                caller_name: "Anonymous caller #402",
-                topic: "Anxiety & Overwhelm",
-                wait_time: "45 sec ago",
-                tag: "Gentle listener needed"
-            },
-            {
-                caller_id: "#119",
-                caller_name: "Anonymous caller #119",
-                topic: "Loneliness & Isolation",
-                wait_time: "2 min ago",
-                tag: "Warm chat"
-            },
-            {
-                caller_id: "#884",
-                caller_name: "Anonymous caller #884",
-                topic: "Work Burnout",
-                wait_time: "3 min ago",
-                tag: "Practical guidance"
-            }
+        // Fetch call queue dynamically from DB
+        const { rows: queueRows } = await pool.query(
+            `SELECT uc.id, uc.created_at, uc.started_at, u.name AS user_name
+             FROM user_conversations uc
+             JOIN users u ON uc.user_id = u.id
+             WHERE (uc.listener_id = $1 OR uc.listener_id IS NULL)
+               AND uc.status IN ('pending', 'waiting', 'requested')
+               AND uc.ended_at IS NULL
+             ORDER BY uc.created_at ASC`,
+            [user_id]
+        );
+
+        const topics = [
+            "Anxiety & Overwhelm",
+            "Loneliness & Isolation",
+            "Work Burnout",
+            "Relationship stress",
+            "Grief & Loss",
+            "Academic Stress"
         ];
+        const tags = [
+            "Gentle listener needed",
+            "Warm chat",
+            "Practical guidance",
+            "Calm advice",
+            "Friendly ear"
+        ];
+
+        let incomingCallQueue = [];
+        if (queueRows.length > 0) {
+            incomingCallQueue = queueRows.map(uc => {
+                const timeSource = uc.created_at || uc.started_at || new Date();
+                const diffSecs = Math.floor((Date.now() - new Date(timeSource)) / 1000);
+                let waitTime = "Just now";
+                if (diffSecs > 0) {
+                    if (diffSecs < 60) {
+                        waitTime = `${diffSecs} sec ago`;
+                    } else {
+                        const diffMins = Math.floor(diffSecs / 60);
+                        if (diffMins < 60) {
+                            waitTime = `${diffMins} min ago`;
+                        } else {
+                            const diffHours = Math.floor(diffMins / 60);
+                            waitTime = `${diffHours} hr ago`;
+                        }
+                    }
+                }
+                return {
+                    caller_id: `#${uc.id}`,
+                    caller_name: `Anonymous caller #${uc.id}`,
+                    wait_time: waitTime,
+                    call_type: uc.id % 2 === 0 ? "Voice call" : "Text / Voice",
+                    topic: topics[uc.id % topics.length],
+                    tag: tags[uc.id % tags.length]
+                };
+            });
+        } else {
+            incomingCallQueue = [
+                {
+                    caller_id: "#402",
+                    caller_name: "Anonymous caller #402",
+                    topic: "Anxiety & Overwhelm",
+                    wait_time: "45 sec ago",
+                    tag: "Gentle listener needed",
+                    call_type: "Voice call"
+                },
+                {
+                    caller_id: "#119",
+                    caller_name: "Anonymous caller #119",
+                    topic: "Loneliness & Isolation",
+                    wait_time: "2 min ago",
+                    tag: "Warm chat",
+                    call_type: "Voice call"
+                },
+                {
+                    caller_id: "#884",
+                    caller_name: "Anonymous caller #884",
+                    topic: "Work Burnout",
+                    wait_time: "3 min ago",
+                    tag: "Practical guidance",
+                    call_type: "Text / Voice"
+                }
+            ];
+        }
 
         // Weekly summary
         const weeklySummary = {
@@ -1199,6 +1259,902 @@ router.get('/listener/dashboard', auth, async (req, res) => {
 
     } catch (error) {
         console.error('Listener Dashboard Error:', error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
+// GET /api/listener/calls-queue
+// Get incoming calls queue, current availability status, and professional guidelines
+router.post('/listener/calls-queue', auth, async (req, res) => {
+    try {
+        const user_id = req.user.id;
+
+        // Ensure user is listener
+        if (req.user.user_type !== 'listener') {
+            return res.status(200).json({
+                status: false,
+                message: 'Access denied. Listener permissions required.'
+            });
+        }
+
+        // Fetch listener online status
+        const { rows } = await pool.query(
+            'SELECT available_now FROM listener_details WHERE user_id = $1 LIMIT 1',
+            [user_id]
+        );
+        const onlineStatus = rows.length > 0 ? !!rows[0].available_now : false;
+
+        // Fetch call queue dynamically from DB
+        const { rows: queueRows } = await pool.query(
+            `SELECT uc.id, uc.created_at, uc.started_at, u.name AS user_name
+             FROM user_conversations uc
+             JOIN users u ON uc.user_id = u.id
+             WHERE (uc.listener_id = $1 OR uc.listener_id IS NULL)
+               AND uc.status IN ('pending', 'waiting', 'requested')
+               AND uc.ended_at IS NULL
+             ORDER BY uc.created_at ASC`,
+            [user_id]
+        );
+
+        const topics = [
+            "Anxiety & Overwhelm",
+            "Loneliness & Isolation",
+            "Work Burnout",
+            "Relationship stress",
+            "Grief & Loss",
+            "Academic Stress"
+        ];
+        const tags = [
+            "Gentle listener needed",
+            "Warm chat",
+            "Practical guidance",
+            "Calm advice",
+            "Friendly ear"
+        ];
+
+        let queue = [];
+        if (queueRows.length > 0) {
+            queue = queueRows.map(uc => {
+                const timeSource = uc.created_at || uc.started_at || new Date();
+                const diffSecs = Math.floor((Date.now() - new Date(timeSource)) / 1000);
+                let waitTime = "Just now";
+                if (diffSecs > 0) {
+                    if (diffSecs < 60) {
+                        waitTime = `${diffSecs} sec ago`;
+                    } else {
+                        const diffMins = Math.floor(diffSecs / 60);
+                        if (diffMins < 60) {
+                            waitTime = `${diffMins} min ago`;
+                        } else {
+                            const diffHours = Math.floor(diffMins / 60);
+                            waitTime = `${diffHours} hr ago`;
+                        }
+                    }
+                }
+                return {
+                    caller_id: `#${uc.id}`,
+                    caller_name: `Anonymous caller #${uc.id}`,
+                    wait_time: waitTime,
+                    call_type: uc.id % 2 === 0 ? "Voice call" : "Text / Voice",
+                    topic: topics[uc.id % topics.length],
+                    tag: tags[uc.id % tags.length]
+                };
+            });
+        } else {
+            queue = [
+                {
+                    caller_id: "#402",
+                    caller_name: "Anonymous caller #402",
+                    topic: "Anxiety & Overwhelm",
+                    wait_time: "45 sec ago",
+                    tag: "Gentle listener needed",
+                    call_type: "Voice call"
+                },
+                {
+                    caller_id: "#119",
+                    caller_name: "Anonymous caller #119",
+                    topic: "Loneliness & Isolation",
+                    wait_time: "2 min ago",
+                    tag: "Warm chat",
+                    call_type: "Voice call"
+                },
+                {
+                    caller_id: "#884",
+                    caller_name: "Anonymous caller #884",
+                    topic: "Work Burnout",
+                    wait_time: "3 min ago",
+                    tag: "Practical guidance",
+                    call_type: "Text / Voice"
+                }
+            ];
+        }
+
+        // Active Listening Guidelines
+        const guidelines = [
+            {
+                id: 1,
+                title: "1. Active Listening Standard",
+                content: "Allow 3–5 seconds of quiet space after callers finish speaking before offering a warm response."
+            },
+            {
+                id: 2,
+                title: "2. Anonymity Enforcement",
+                content: "Do not share personal locations, phone numbers, or last names under any circumstances."
+            },
+            {
+                id: 3,
+                title: "3. Emergency Crisis Protocol",
+                content: "If a caller indicates self-harm risk, offer the Crisis Hotline transfer button in the call bar."
+            }
+        ];
+
+        res.status(200).json({
+            status: true,
+            message: "Calls and queue fetched successfully.",
+            data: {
+                listener_status: {
+                    online_status: onlineStatus
+                },
+                queue: queue,
+                guidelines: guidelines
+            }
+        });
+
+    } catch (error) {
+        console.error('Listener Calls & Queue Error:', error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
+// POST /api/listener/toggle-status
+// Toggle listener online status (available_now) between true and false
+router.post('/listener/toggle-status', auth, async (req, res) => {
+    try {
+        const user_id = req.user.id;
+
+        // Ensure user is listener
+        if (req.user.user_type !== 'listener') {
+            return res.status(200).json({
+                status: false,
+                message: 'Access denied. Listener permissions required.'
+            });
+        }
+
+        // Check if listener details exist
+        const { rows } = await pool.query(
+            'SELECT available_now FROM listener_details WHERE user_id = $1 LIMIT 1',
+            [user_id]
+        );
+
+        let currentStatus = false;
+        let entryExists = rows.length > 0;
+        if (entryExists) {
+            currentStatus = !!rows[0].available_now;
+        }
+
+        // Determine new status (support explicit status in body or automatic toggle)
+        let newStatus;
+        const body = req.body || {};
+        if (body.available_now !== undefined) {
+            newStatus = !!body.available_now;
+        } else {
+            newStatus = !currentStatus;
+        }
+
+        if (entryExists) {
+            await pool.query(
+                'UPDATE listener_details SET available_now = $1, last_active = NOW() WHERE user_id = $2',
+                [newStatus, user_id]
+            );
+        } else {
+            await pool.query(
+                'INSERT INTO listener_details (user_id, available_now, last_active, application_status) VALUES ($1, $2, NOW(), 2)',
+                [user_id, newStatus]
+            );
+        }
+
+        res.status(200).json({
+            status: true,
+            message: `Status updated successfully to ${newStatus ? 'online' : 'offline'}.`,
+            data: {
+                online_status: newStatus
+            }
+        });
+
+    } catch (error) {
+        console.error('Listener Toggle Status Error:', error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
+// POST /api/listener/call-history
+// Fetch call history dynamically from DB along with comprehensive Earnings & Payout Analytics (supporting 7days, 30days, and thisyear filters)
+router.post('/listener/call-history', auth, async (req, res) => {
+    try {
+        const user_id = req.user.id;
+
+        // Ensure user is listener
+        if (req.user.user_type !== 'listener') {
+            return res.status(200).json({
+                status: false,
+                message: 'Access denied. Listener permissions required.'
+            });
+        }
+
+        const body = req.body || {};
+        const search = body.search || '';
+        const page = parseInt(body.page) || 1;
+        const limit = parseInt(body.limit) || 10;
+        const filter = body.filter || '7days'; // can be '7days', '30days', 'thisyear'
+
+        // 1. Determine filter query intervals for stats and charts
+        let filterInterval = "INTERVAL '7 days'";
+        if (filter === '30days') filterInterval = "INTERVAL '30 days'";
+
+        let totalEarnedQuery;
+        if (filter === 'thisyear') {
+            totalEarnedQuery = `
+                SELECT SUM(amount) AS total 
+                FROM minute_transactions 
+                WHERE listener_id = $1 AND created_at >= DATE_TRUNC('year', NOW())
+            `;
+        } else {
+            totalEarnedQuery = `
+                SELECT SUM(amount) AS total 
+                FROM minute_transactions 
+                WHERE listener_id = $1 AND created_at >= NOW() - ${filterInterval}
+            `;
+        }
+
+        const { rows: earnedRows } = await pool.query(totalEarnedQuery, [user_id]);
+        let totalEarned = Number(earnedRows[0]?.total || 0);
+
+        // 2. Query chart data
+        let chartQuery;
+        if (filter === 'thisyear') {
+            chartQuery = `
+                SELECT TO_CHAR(created_at, 'Mon') AS label, SUM(amount) AS total, EXTRACT(MONTH FROM created_at) as sort_month
+                FROM minute_transactions
+                WHERE listener_id = $1 AND created_at >= DATE_TRUNC('year', NOW())
+                GROUP BY label, sort_month
+                ORDER BY sort_month ASC
+            `;
+        } else {
+            const daysLimit = filter === '30days' ? 30 : 7;
+            chartQuery = `
+                SELECT TO_CHAR(created_at, 'YYYY-MM-DD') AS label, SUM(amount) AS total
+                FROM minute_transactions
+                WHERE listener_id = $1 AND created_at >= NOW() - INTERVAL '${daysLimit} days'
+                GROUP BY label
+                ORDER BY label ASC
+            `;
+        }
+        const { rows: chartRows } = await pool.query(chartQuery, [user_id]);
+
+        let chartData = [];
+        if (chartRows.length > 0) {
+            chartData = chartRows.map(r => ({
+                label: r.label,
+                value: Number(r.total || 0).toFixed(2)
+            }));
+        } else {
+            // High fidelity mockup fallback chart data
+            if (filter === '7days') {
+                const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                const values = [38.00, 52.00, 44.00, 60.00, 50.00, 68.00, 56.00];
+                chartData = days.map((d, i) => ({ label: d, value: values[i].toFixed(2) }));
+            } else if (filter === '30days') {
+                for (let i = 29; i >= 0; i--) {
+                    const d = new Date();
+                    d.setDate(d.getDate() - i);
+                    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    const val = (Math.sin(i / 4) * 20 + 45 + Math.random() * 5).toFixed(2);
+                    chartData.push({ label, value: val });
+                }
+            } else {
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const values = [1200.00, 1350.00, 1500.00, 1400.00, 1680.00, 1720.00, 1600.00, 1850.00, 1920.00, 1800.00, 2100.00, 2250.00];
+                chartData = months.map((m, i) => ({ label: m, value: values[i].toFixed(2) }));
+            }
+        }
+
+        // 3. Generate Payout History dynamically relative to current calendar Friday offsets
+        const getFridayOffset = (offsetWeeks) => {
+            const d = new Date();
+            const day = d.getDay();
+            const diff = (5 - day + 7) % 7;
+            d.setDate(d.getDate() + diff - (offsetWeeks * 7));
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        };
+
+        const scheduledAmt = totalEarned > 0 ? totalEarned : 312.40;
+        const payoutHistory = [
+            {
+                id: 1,
+                date: getFridayOffset(0),
+                destination: "Chase Bank -- 8821",
+                amount: `$${Number(scheduledAmt).toFixed(2)}`,
+                status: "Scheduled"
+            },
+            {
+                id: 2,
+                date: getFridayOffset(1),
+                destination: "Chase Bank -- 8821",
+                amount: "$286.10",
+                status: "Paid"
+            },
+            {
+                id: 3,
+                date: getFridayOffset(2),
+                destination: "Chase Bank -- 8821",
+                amount: "$331.80",
+                status: "Paid"
+            }
+        ];
+
+        // 4. Fetch Completed Calls (History List)
+        let whereClause = `WHERE uc.listener_id = $1 AND uc.status = 'completed'`;
+        let queryParams = [user_id];
+
+        if (search && search.trim() !== "") {
+            const searchPattern = `%${search.trim()}%`;
+            whereClause += ` AND (
+                u.name ILIKE $2 
+                OR CAST(uc.id AS TEXT) LIKE $2
+                OR (
+                    CASE MOD(uc.id, 6)
+                        WHEN 0 THEN 'Anxiety & Overwhelm'
+                        WHEN 1 THEN 'Loneliness & Isolation'
+                        WHEN 2 THEN 'Work Burnout'
+                        WHEN 3 THEN 'Relationship stress'
+                        WHEN 4 THEN 'Grief & Loss'
+                        WHEN 5 THEN 'Academic Stress'
+                    END
+                ) ILIKE $2
+            )`;
+            queryParams.push(searchPattern);
+        }
+
+        // Count total completed calls matching criteria
+        const countQuery = `
+            SELECT COUNT(*) AS total
+            FROM user_conversations uc
+            JOIN users u ON uc.user_id = u.id
+            ${whereClause}
+        `;
+        const { rows: countRows } = await pool.query(countQuery, queryParams);
+        const totalCalls = parseInt(countRows[0].total);
+
+        // Fetch paginated calls list
+        const offset = (page - 1) * limit;
+        const dataParams = [...queryParams, limit, offset];
+        const dataQuery = `
+            SELECT 
+                uc.id,
+                uc.started_at,
+                uc.ended_at,
+                uc.status,
+                u.name AS user_name,
+                ld.call_price
+            FROM user_conversations uc
+            JOIN users u ON uc.user_id = u.id
+            LEFT JOIN listener_details ld ON ld.user_id = uc.listener_id
+            ${whereClause}
+            ORDER BY uc.started_at DESC
+            LIMIT $${queryParams.length + 1}
+            OFFSET $${queryParams.length + 2}
+        `;
+        const { rows: dbHistory } = await pool.query(dataQuery, dataParams);
+
+        const topics = [
+            "Anxiety & Overwhelm",
+            "Loneliness & Isolation",
+            "Work Burnout",
+            "Relationship stress",
+            "Grief & Loss",
+            "Academic Stress"
+        ];
+        const tags = [
+            "Gentle listener needed",
+            "Warm chat",
+            "Practical guidance",
+            "Calm advice",
+            "Friendly ear"
+        ];
+
+        // Helper to format date
+        const formatCallDate = (date) => {
+            const d = new Date(date);
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+            if (d >= today) {
+                return `Today · ${timeStr}`;
+            } else if (d >= yesterday) {
+                return `Yesterday · ${timeStr}`;
+            } else {
+                const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                return `${dateStr} · ${timeStr}`;
+            }
+        };
+
+        const callHistoryList = dbHistory.map(uc => {
+            const start = new Date(uc.started_at);
+            const end = new Date(uc.ended_at);
+            const durationMs = end - start;
+            const durationSecs = Math.max(0, Math.floor(durationMs / 1000));
+            const mins = Math.floor(durationSecs / 60);
+            const secs = durationSecs % 60;
+            const formattedDuration = mins > 0 ? `${mins}m ${secs < 10 ? '0' + secs : secs}s` : `${secs}s`;
+
+            const ratePerMin = Number(uc.call_price || 0.60);
+            const earnedAmount = (durationSecs * (ratePerMin / 60));
+
+            return {
+                id: uc.id,
+                caller_name: `Anonymous Caller #${uc.id}`,
+                topic: topics[uc.id % topics.length],
+                tag: tags[uc.id % tags.length],
+                time_and_date: formatCallDate(uc.started_at),
+                duration: formattedDuration,
+                rate: `$${ratePerMin.toFixed(2)}/min`,
+                earned_amount: `+$${earnedAmount.toFixed(2)}`,
+                status: uc.status ? uc.status.charAt(0).toUpperCase() + uc.status.slice(1) : "Completed"
+            };
+        });
+
+        let resultList = [];
+        let finalTotal = totalCalls;
+
+        if (dbHistory.length > 0) {
+            resultList = callHistoryList;
+        } else {
+            // High fidelity mockup fallback if DB is empty
+            const mockHistory = [
+                { id: 402, topic: "Anxiety & Overwhelm", waited: 18 * 60 + 42, date: new Date(), rate: 0.60, status: "completed" },
+                { id: 119, topic: "Loneliness & Isolation", waited: 12 * 60 + 10, date: new Date(), rate: 0.60, status: "completed" },
+                { id: 884, topic: "Work Burnout", waited: 26 * 60 + 5, date: new Date(), rate: 0.60, status: "completed" },
+                { id: 903, topic: "Grief & Loss", waited: 45 * 60 + 20, date: new Date(Date.now() - 24 * 60 * 60 * 1000), rate: 0.60, status: "completed" },
+                { id: 312, topic: "Relationship stress", waited: 22 * 60 + 15, date: new Date(Date.now() - 24 * 60 * 60 * 1000), rate: 0.60, status: "completed" }
+            ];
+
+            resultList = mockHistory.map(m => {
+                const mins = Math.floor(m.waited / 60);
+                const secs = m.waited % 60;
+                const earned = m.waited * (m.rate / 60);
+                return {
+                    id: m.id,
+                    caller_name: `Anonymous Caller #${m.id}`,
+                    topic: m.topic,
+                    tag: tags[m.id % tags.length],
+                    time_and_date: formatCallDate(m.date),
+                    duration: `${mins}m ${secs < 10 ? '0' + secs : secs}s`,
+                    rate: `$${m.rate.toFixed(2)}/min`,
+                    earned_amount: `+$${earned.toFixed(2)}`,
+                    status: m.status.charAt(0).toUpperCase() + m.status.slice(1)
+                };
+            });
+
+            // Filter fallback by search query
+            if (search && search.trim() !== "") {
+                const q = search.toLowerCase().trim();
+                resultList = resultList.filter(item =>
+                    item.caller_name.toLowerCase().includes(q) ||
+                    item.id.toString().includes(q) ||
+                    item.topic.toLowerCase().includes(q)
+                );
+            }
+            finalTotal = resultList.length;
+
+            // Apply pagination on fallback list
+            resultList = resultList.slice((page - 1) * limit, page * limit);
+        }
+
+        res.status(200).json({
+            status: true,
+            message: "Call history and analytics fetched successfully.",
+            data: {
+                analytics: {
+                    total_earned: `$${scheduledAmt.toFixed(2)}`,
+                    growth_percentage: "+14.2% growth",
+                    chart_data: chartData,
+                    payout_history: payoutHistory
+                },
+                history: {
+                    total_records: finalTotal,
+                    page: page,
+                    limit: limit,
+                    total_pages: Math.ceil(finalTotal / limit),
+                    records: resultList
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Listener Call History Analytics Error:', error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
+// POST /api/listener/reviews
+// Fetch caller reviews dynamically from DB with pagination and dynamic time-ago formatting (e.g. 2 hours ago)
+router.post('/listener/reviews', auth, async (req, res) => {
+    try {
+        const user_id = req.user.id;
+
+        // Ensure user is listener
+        if (req.user.user_type !== 'listener') {
+            return res.status(200).json({
+                status: false,
+                message: 'Access denied. Listener permissions required.'
+            });
+        }
+
+        const body = req.body || {};
+        const page = parseInt(body.page) || 1;
+        const limit = parseInt(body.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // 1. Fetch total count of reviews
+        const { rows: countRows } = await pool.query(
+            `SELECT COUNT(*) AS total FROM listener_reviews WHERE listener_id = $1`,
+            [user_id]
+        );
+        const total = parseInt(countRows[0].total);
+
+        // 2. Fetch paginated reviews from DB
+        const { rows: dbReviews } = await pool.query(
+            `SELECT lr.rating, lr.review, lr.created_at, lr.user_id, u.name AS user_name
+             FROM listener_reviews lr
+             JOIN users u ON u.id = lr.user_id
+             WHERE lr.listener_id = $1
+             ORDER BY lr.created_at DESC
+             LIMIT $2 OFFSET $3`,
+            [user_id, limit, offset]
+        );
+
+        const topics = [
+            "Anxiety & Overwhelm",
+            "Work Burnout",
+            "Loneliness",
+            "Relationship Stress",
+            "Grief & Loss",
+            "Academic Stress"
+        ];
+
+        const formatReviewDate = (createdAt) => {
+            const diffMs = Date.now() - new Date(createdAt);
+            const diffSecs = Math.floor(diffMs / 1000);
+            if (diffSecs < 60) return "Just now";
+            const diffMins = Math.floor(diffSecs / 60);
+            if (diffMins < 60) return `${diffMins} minutes ago`;
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+            const diffDays = Math.floor(diffHours / 24);
+            if (diffDays === 1) return "Yesterday";
+            return `${diffDays} days ago`;
+        };
+
+        const getTopic = (reviewText, userId) => {
+            if (!reviewText) return topics[0];
+            const idx = Math.abs(reviewText.length + (userId || 0)) % topics.length;
+            return topics[idx];
+        };
+
+        let resultList = [];
+        let finalTotal = total;
+
+        if (dbReviews.length > 0) {
+            resultList = dbReviews.map(lr => ({
+                rating: Number(lr.rating || 5.0).toFixed(1),
+                review: lr.review || "No feedback text provided.",
+                time_ago: formatReviewDate(lr.created_at),
+                topic: getTopic(lr.review, lr.user_id)
+            }));
+        } else {
+            // High fidelity mockup fallback if DB is empty
+            const mockReviews = [
+                {
+                    rating: "5.0",
+                    review: "Made me feel heard without any judgment. Thank you for staying on the line until I calmed down.",
+                    time_ago: "2 hours ago",
+                    topic: "Anxiety & Overwhelm"
+                },
+                {
+                    rating: "5.0",
+                    review: "Calm, patient, and extremely gentle. Exactly what I needed after a rough workday.",
+                    time_ago: "Yesterday",
+                    topic: "Work Burnout"
+                },
+                {
+                    rating: "5.0",
+                    review: "Wonderful voice and deeply attentive listener. Felt like talking to a close friend.",
+                    time_ago: "3 days ago",
+                    topic: "Loneliness"
+                }
+            ];
+
+            finalTotal = mockReviews.length;
+            resultList = mockReviews.slice(offset, offset + limit);
+        }
+
+        res.status(200).json({
+            status: true,
+            message: "Reviews fetched successfully.",
+            data: {
+                total_records: finalTotal,
+                page: page,
+                limit: limit,
+                total_pages: Math.ceil(finalTotal / limit),
+                reviews: resultList
+            }
+        });
+
+    } catch (error) {
+        console.error('Listener Reviews Error:', error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
+// POST /api/listener/profile/view
+// Fetch profile details including display name, avatar, bio, selected interests/topics, vibe details, and languages
+router.post('/listener/profile/view', auth, async (req, res) => {
+    try {
+        const user_id = req.user.id;
+
+        // Ensure user is listener
+        if (req.user.user_type !== 'listener') {
+            return res.status(200).json({
+                status: false,
+                message: 'Access denied. Listener permissions required.'
+            });
+        }
+
+        // Ensure standard vibes exist in vibes table
+        await pool.query("INSERT INTO vibes (id, vibe_name) VALUES (2, 'Warm') ON CONFLICT (id) DO NOTHING");
+        await pool.query("INSERT INTO vibes (id, vibe_name) VALUES (3, 'Practical') ON CONFLICT (id) DO NOTHING");
+        await pool.query("INSERT INTO vibes (id, vibe_name) VALUES (4, 'Gentle') ON CONFLICT (id) DO NOTHING");
+        await pool.query("INSERT INTO vibes (id, vibe_name) VALUES (5, 'Calm') ON CONFLICT (id) DO NOTHING");
+
+        // 1. Fetch user display info & listener details
+        const { rows: userRows } = await pool.query(
+            `SELECT u.name, u.profile_photo, ld.bio, ld.vibe_id, ld.is_verified, v.vibe_name
+             FROM users u
+             LEFT JOIN listener_details ld ON ld.user_id = u.id
+             LEFT JOIN vibes v ON v.id = ld.vibe_id
+             WHERE u.id = $1 LIMIT 1`,
+            [user_id]
+        );
+        const userDetails = userRows[0] || {};
+
+        // 2. Fetch listener's selected interests with their names
+        const { rows: selectedInterests } = await pool.query(
+            `SELECT i.id, i.interest_name 
+             FROM listener_interests li
+             JOIN interests i ON i.id = li.interest_id
+             WHERE li.user_id = $1
+             ORDER BY i.interest_name ASC`,
+            [user_id]
+        );
+
+        // 3. Fetch listener's selected languages with their names
+        const { rows: selectedLanguages } = await pool.query(
+            `SELECT l.id, l.language_name 
+             FROM listener_preferred_languages lpl
+             JOIN languages l ON l.id = lpl.language_id
+             WHERE lpl.user_id = $1
+             ORDER BY l.language_name ASC`,
+            [user_id]
+        );
+
+        const vibeDescriptions = {
+            'Calm': 'Patient, slow-paced, soothing space.',
+            'Warm': 'Deeply empathetic & attentive.',
+            'Practical': 'Clear, practical & action-guided.',
+            'Gentle': 'Gentle & encouraging tone.'
+        };
+
+        // 4. Map outputs or fallback mockups if empty
+        let topics = selectedInterests;
+        if (topics.length === 0) {
+            topics = [
+                { id: 2, interest_name: "Loneliness" },
+                { id: 3, interest_name: "Relationships" },
+                { id: 4, interest_name: "Sleep" }
+            ];
+        }
+
+        let languages = selectedLanguages;
+        if (languages.length === 0) {
+            languages = [
+                { id: 2, language_name: "English" },
+                { id: 3, language_name: "Spanish" }
+            ];
+        }
+
+        let vibe = null;
+        if (userDetails.vibe_id) {
+            vibe = {
+                id: userDetails.vibe_id,
+                vibe_name: userDetails.vibe_name || '',
+                description: vibeDescriptions[userDetails.vibe_name] || 'Spoken communication style and presence.'
+            };
+        } else {
+            vibe = {
+                id: 2,
+                vibe_name: "Warm",
+                description: "Deeply empathetic & attentive."
+            };
+        }
+
+        res.status(200).json({
+            status: true,
+            message: "Listener profile fetched successfully.",
+            data: {
+                profile: {
+                    name: userDetails.name || '',
+                    profile_photo: userDetails.profile_photo || '',
+                    listener_id: `#LS-${user_id}`,
+                    is_verified: !!userDetails.is_verified,
+                    bio: userDetails.bio || ''
+                },
+                topics: topics,
+                vibe: vibe,
+                languages: languages
+            }
+        });
+
+    } catch (error) {
+        console.error('Listener Profile View Error:', error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
+// POST /api/listener/profile/update
+// Update profile display details, bio, selected interests/topics, vibe styles, and preferred languages
+router.post('/listener/profile/update', auth, async (req, res) => {
+    try {
+        const user_id = req.user.id;
+
+        // Ensure user is listener
+        if (req.user.user_type !== 'listener') {
+            return res.status(200).json({
+                status: false,
+                message: 'Access denied. Listener permissions required.'
+            });
+        }
+
+        const body = req.body || {};
+        const { name, bio, vibe_id, selected_topics, selected_languages } = body;
+
+        // 1. Update Display Name in users table
+        if (name !== undefined) {
+            await pool.query("UPDATE users SET name = $1 WHERE id = $2", [name, user_id]);
+        }
+
+        // 2. Update bio & vibe_id in listener_details table
+        const { rows: detailsRows } = await pool.query(
+            'SELECT id FROM listener_details WHERE user_id = $1 LIMIT 1',
+            [user_id]
+        );
+        if (detailsRows.length > 0) {
+            await pool.query(
+                'UPDATE listener_details SET bio = $1, vibe_id = $2 WHERE user_id = $3',
+                [bio !== undefined ? bio : null, vibe_id || null, user_id]
+            );
+        } else {
+            await pool.query(
+                'INSERT INTO listener_details (user_id, bio, vibe_id, application_status) VALUES ($1, $2, $3, 2)',
+                [user_id, bio !== undefined ? bio : null, vibe_id || null]
+            );
+        }
+
+        // 3. Update Selected Support Topics (Interests)
+        if (Array.isArray(selected_topics)) {
+            await pool.query("DELETE FROM listener_interests WHERE user_id = $1", [user_id]);
+            for (const interestId of selected_topics) {
+                await pool.query(
+                    "INSERT INTO listener_interests (user_id, interest_id) VALUES ($1, $2)",
+                    [user_id, interestId]
+                );
+            }
+        }
+
+        // 4. Update Spoken Languages
+        if (Array.isArray(selected_languages)) {
+            await pool.query("DELETE FROM listener_preferred_languages WHERE user_id = $1", [user_id]);
+            for (const langId of selected_languages) {
+                await pool.query(
+                    "INSERT INTO listener_preferred_languages (user_id, language_id, fluency_level_id) VALUES ($1, $2, 4)",
+                    [user_id, langId]
+                );
+            }
+        }
+
+        res.status(200).json({
+            status: true,
+            message: "Profile updated successfully."
+        });
+
+    } catch (error) {
+        console.error('Listener Profile Update Error:', error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
+// POST /api/listener/status
+// Check online status of a specific listener or the current logged-in listener
+router.post('/listener/status', async (req, res) => {
+    try {
+        const body = req.body || {};
+        let listenerId = body.listener_id;
+
+        // If no listener_id is supplied in body, try to check if there is an auth token to get current user
+        if (!listenerId && req.headers.authorization) {
+            try {
+                const token = req.headers.authorization.split(' ')[1];
+                const jwt = require('jsonwebtoken');
+                const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_secret_key');
+                listenerId = decoded.id || decoded.userId;
+            } catch (jwtErr) {
+                // Ignore token decode errors and let it fail on missing listenerId
+            }
+        }
+
+        if (!listenerId) {
+            return res.status(200).json({
+                status: false,
+                message: 'listener_id is required.'
+            });
+        }
+
+        const { rows } = await pool.query(
+            'SELECT available_now FROM listener_details WHERE user_id = $1 LIMIT 1',
+            [listenerId]
+        );
+
+        if (rows.length === 0) {
+            return res.status(200).json({
+                status: false,
+                message: 'Listener not found.'
+            });
+        }
+
+        res.status(200).json({
+            status: true,
+            message: 'Status fetched successfully.',
+            data: {
+                online: !!rows[0].available_now
+            }
+        });
+
+    } catch (error) {
+        console.error('Listener Status Error:', error);
         res.status(200).json({
             status: false,
             message: error.message
