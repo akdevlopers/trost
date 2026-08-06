@@ -859,4 +859,124 @@ router.post('/delete-account', auth, async (req, res) => {
     }
 });
 
+// POST /api/listener-login
+// Authenticate listener via email/phone and password, and return user & application details
+router.post('/listener-login', async (req, res) => {
+    try {
+        const { email, phone, password } = req.body;
+
+        if ((!email && !phone) || !password) {
+            return res.status(200).json({
+                status: false,
+                message: 'Email or Phone, and Password are required.'
+            });
+        }
+
+        let user;
+        if (email) {
+            const cleanEmail = email.trim().toLowerCase();
+            const { rows: users } = await pool.query(
+                'SELECT * FROM users WHERE email = $1 LIMIT 1',
+                [cleanEmail]
+            );
+            if (users.length === 0) {
+                return res.status(200).json({
+                    status: false,
+                    message: 'Listener account not found.'
+                });
+            }
+            user = users[0];
+        } else {
+            const cleanPhone = phone.trim();
+            const { rows: users } = await pool.query(
+                'SELECT * FROM users WHERE phone = $1 LIMIT 1',
+                [cleanPhone]
+            );
+            if (users.length === 0) {
+                return res.status(200).json({
+                    status: false,
+                    message: 'Listener account not found.'
+                });
+            }
+            user = users[0];
+        }
+
+        // Verify password
+        if (!user.password) {
+            return res.status(200).json({
+                status: false,
+                message: 'Password not set for this account.'
+            });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(200).json({
+                status: false,
+                message: 'Invalid password.'
+            });
+        }
+
+        // Ensure user type is listener
+        if (user.user_type !== 'listener') {
+            return res.status(200).json({
+                status: false,
+                message: 'This account is not registered as a listener.'
+            });
+        }
+
+        // Fetch listener details
+        const { rows: listenerDetails } = await pool.query(
+            'SELECT * FROM listener_details WHERE user_id = $1 LIMIT 1',
+            [user.id]
+        );
+
+        let listener = null;
+        if (listenerDetails.length > 0) {
+            listener = { ...listenerDetails[0] };
+            const BASE_URL = `${req.protocol}://${req.get('host')}`;
+            if (listener.profile_photo) listener.profile_photo = `${BASE_URL}/uploads/${listener.profile_photo}`;
+            if (listener.primary_voice) listener.primary_voice = `${BASE_URL}/uploads/${listener.primary_voice}`;
+            if (listener.secondary_voice) listener.secondary_voice = `${BASE_URL}/uploads/${listener.secondary_voice}`;
+        }
+
+        // Generate Access Token
+        const token = jwt.sign(
+            {
+                userId: user.id,
+                user_type: user.user_type
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: '30d'
+            }
+        );
+
+        const BASE_URL = `${req.protocol}://${req.get('host')}`;
+        res.status(200).json({
+            status: true,
+            message: 'Login successful.',
+            access_token: token,
+            token_type: 'Bearer',
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                user_type: user.user_type,
+                profile_photo: user.profile_photo ? `${BASE_URL}/uploads/${user.profile_photo}` : null
+            },
+            listener_details: listener
+        });
+
+    } catch (error) {
+        console.error('Listener Login Error:', error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
 module.exports = router;
+
