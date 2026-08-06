@@ -22,7 +22,8 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
             ready_to_start,
             premium_boost,
             code_of_conduct_agreed,
-            bio
+            bio,
+            password
         } = req.body;
 
         if (!bio || bio.trim() === "") {
@@ -33,43 +34,47 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
         }
 
         let interests = [];
-            if (req.body.interests) {
-                interests = JSON.parse(req.body.interests);
-            }
+        if (req.body.interests) {
+            interests = JSON.parse(req.body.interests);
+        }
 
         let languages = [];
         if (req.body.languages) {
             languages = JSON.parse(req.body.languages);
         }
         if (!full_name)
-            return res.status(200).json({ status: false, message: "Full name is required." },200);
+            return res.status(200).json({ status: false, message: "Full name is required." }, 200);
         if (!current_location)
-            return res.status(200).json({ status: false, message: "Current location is required." },200);
+            return res.status(200).json({ status: false, message: "Current location is required." }, 200);
         if (!home_country)
-            return res.status(200).json({ status: false, message: "Home country is required." },200);
+            return res.status(200).json({ status: false, message: "Home country is required." }, 200);
         if (!university_email)
-            return res.status(200).json({ status: false, message: "university_email is required." },200);
+            return res.status(200).json({ status: false, message: "university_email is required." }, 200);
+        if (!password)
+            return res.status(200).json({ status: false, message: "Password is required." }, 200);
+        if (password.length < 6)
+            return res.status(200).json({ status: false, message: "Password must be at least 6 characters." }, 200);
         if (!vibe_id)
-            return res.status(200).json({ status: false, message: "Vibe is required." },200);
+            return res.status(200).json({ status: false, message: "Vibe is required." }, 200);
         if (!profile_type)
-            return res.status(200).json({ status: false, message: "Profile type is required." },200);
+            return res.status(200).json({ status: false, message: "Profile type is required." }, 200);
         if (!Array.isArray(languages) || languages.length == 0)
             return res.status(200).json({
                 status: false,
                 message: "Please select at least one language."
-            },200);
+            }, 200);
 
         if (!Array.isArray(interests) || interests.length == 0)
             return res.status(200).json({
                 status: false,
                 message: "Please select at least one interest."
-            },200);
+            }, 200);
 
         if (!vibe_id) {
             return res.status(200).json({
                 status: false,
                 message: "Please select a vibe."
-            },200);
+            }, 200);
         }
 
         const { rows: vibe } = await pool.query(
@@ -81,7 +86,7 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
             return res.status(200).json({
                 status: false,
                 message: "Invalid vibe."
-            },200);
+            }, 200);
         }
 
         let profilePhoto = null;
@@ -102,22 +107,25 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
             return res.status(200).json({
                 status: false,
                 message: "Please select whether you are ready to start."
-            },200);
+            }, 200);
         }
 
         if (premium_boost === undefined) {
             return res.status(200).json({
                 status: false,
                 message: "Please choose whether to join the Premium Boost program."
-            },200);
+            }, 200);
         }
 
         if (Number(code_of_conduct_agreed) !== 1) {
             return res.status(200).json({
                 status: false,
                 message: "You must agree to the Code of Conduct before submitting your application."
-            },200);
+            }, 200);
         }
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 12);
+
         // Check user by university email
         const { rows: users } = await pool.query(
             "SELECT id FROM users WHERE email = $1",
@@ -126,34 +134,38 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
         let userId;
         if (users.length > 0) {
             userId = users[0].id;
-            // Update existing user
+            // Update existing user including password
             await pool.query(
                 `UPDATE users
                 SET
                     name = $1,
-                    user_type = 'listener'
-                WHERE id = $2`,
+                    user_type = 'listener',
+                    password = $2
+                WHERE id = $3`,
                 [
                     full_name,
+                    hashedPassword,
                     userId
                 ]
             );
         } else {
-            // Create new user
+            // Create new user with password
             const { rows: result } = await pool.query(
                 `INSERT INTO users
                 (
                     name,
                     email,
                     user_type,
-                    email_verified
+                    email_verified,
+                    password
                 )
-                VALUES ($1,$2,$3,$4) RETURNING id`,
+                VALUES ($1,$2,$3,$4,$5) RETURNING id`,
                 [
                     full_name,
                     university_email,
                     'listener',
-                    0
+                    0,
+                    hashedPassword
                 ]
             );
             userId = result[0].id;
@@ -258,17 +270,17 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
             );
 
         }
-       
+
         res.status(200).json({
             status: true,
             message: "Listener application submitted successfully."
-        },200);
+        }, 200);
 
     } catch (error) {
         res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
     }
 });
 // GET /api/language-list
@@ -287,7 +299,7 @@ router.get('/language-list', async (req, res) => {
             status: true,
             message: 'Language list fetched successfully.',
             data: languages
-        },200);
+        }, 200);
 
     } catch (error) {
         console.error('Language List Error:', error);
@@ -295,7 +307,7 @@ router.get('/language-list', async (req, res) => {
         res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
     }
 });
 // GET /api/fluency-level-list
@@ -314,7 +326,7 @@ router.get('/fluency-level-list', async (req, res) => {
             status: true,
             message: 'Fluency level list fetched successfully.',
             data: levels
-        },200);
+        }, 200);
 
     } catch (error) {
         console.error('Fluency Level List Error:', error);
@@ -322,7 +334,7 @@ router.get('/fluency-level-list', async (req, res) => {
         res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
     }
 });
 // GET /api/listener-application/:user_id
@@ -365,7 +377,7 @@ router.get('/listener-application/:user_id', async (req, res) => {
             return res.status(200).json({
                 status: false,
                 message: "Listener not found."
-            },200);
+            }, 200);
         }
 
         // Languages
@@ -407,14 +419,14 @@ router.get('/listener-application/:user_id', async (req, res) => {
         res.status(200).json({
             status: true,
             data: l
-        },200);
+        }, 200);
 
     } catch (error) {
 
         res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
 
     }
 });
@@ -423,7 +435,7 @@ router.post('/listener-reupload', upload.fields([
     { name: 'profile_photo', maxCount: 1 },
     { name: 'primary_voice', maxCount: 1 },
     { name: 'secondary_voice', maxCount: 1 }
-    ]),
+]),
     async (req, res) => {
         try {
 
@@ -433,7 +445,7 @@ router.post('/listener-reupload', upload.fields([
                 return res.status(200).json({
                     status: false,
                     message: "User ID is required."
-                },200);
+                }, 200);
             }
 
             const { rows } = await pool.query(
@@ -450,7 +462,7 @@ router.post('/listener-reupload', upload.fields([
                 return res.status(200).json({
                     status: false,
                     message: "Listener not found."
-                },200);
+                }, 200);
             }
 
             const listener = rows[0];
@@ -465,7 +477,7 @@ router.post('/listener-reupload', upload.fields([
                     return res.status(200).json({
                         status: false,
                         message: "Profile photo is not rejected."
-                    },200);
+                    }, 200);
                 }
 
                 updates.push("profile_photo = ?");
@@ -481,7 +493,7 @@ router.post('/listener-reupload', upload.fields([
                     return res.status(200).json({
                         status: false,
                         message: "Primary voice is not rejected."
-                    },200);
+                    }, 200);
                 }
 
                 updates.push("primary_voice = ?");
@@ -497,7 +509,7 @@ router.post('/listener-reupload', upload.fields([
                     return res.status(200).json({
                         status: false,
                         message: "Secondary voice is not rejected."
-                    },200);
+                    }, 200);
                 }
 
                 updates.push("secondary_voice = ?");
@@ -510,7 +522,7 @@ router.post('/listener-reupload', upload.fields([
                 return res.status(200).json({
                     status: false,
                     message: "No rejected files uploaded."
-                },200);
+                }, 200);
             }
 
             updates.push("application_status = 1");
@@ -525,14 +537,14 @@ router.post('/listener-reupload', upload.fields([
             res.status(200).json({
                 status: true,
                 message: "Files re-uploaded successfully. Waiting for admin approval."
-            },200);
+            }, 200);
 
         } catch (error) {
 
             res.status(200).json({
                 status: false,
                 message: error.message
-            },200);
+            }, 200);
 
         }
     }
@@ -547,11 +559,11 @@ router.get('/profile', auth, async (req, res) => {
             [user_id]
         );
 
-        if (users.length === 0) return res.status(200).json({ status: false, message: 'User not found.' },200);
+        if (users.length === 0) return res.status(200).json({ status: false, message: 'User not found.' }, 200);
 
-        res.status(200).json({ status: true, data: users[0] },200);
+        res.status(200).json({ status: true, data: users[0] }, 200);
     } catch (error) {
-        res.status(200).json({ status: false, message: error.message },200);
+        res.status(200).json({ status: false, message: error.message }, 200);
     }
 });
 // POST /api/update-profile
@@ -567,7 +579,7 @@ router.post('/update-profile', auth, upload.single('profile_photo'), async (req,
         if (phone) { updates.push('phone = ?'); params.push(phone); }
         if (req.file) { updates.push('profile_photo = ?'); params.push(req.file.filename); }
 
-        if (updates.length === 0) return res.status(200).json({ status: false, message: 'No fields provided to update.' },200);
+        if (updates.length === 0) return res.status(200).json({ status: false, message: 'No fields provided to update.' }, 200);
 
         params.push(user_id);
         let queryStr = `UPDATE users SET ${updates.join(', ')} WHERE id = ?`;
@@ -584,9 +596,9 @@ router.post('/update-profile', auth, upload.single('profile_photo'), async (req,
         const profile = updated[0];
         if (profile.profile_photo) profile.profile_photo = `${BASE_URL}/uploads/${profile.profile_photo}`;
 
-        res.status(200).json({ status: true, message: 'Profile updated successfully.', data: profile },200);
+        res.status(200).json({ status: true, message: 'Profile updated successfully.', data: profile }, 200);
     } catch (error) {
-        res.status(200).json({ status: false, message: error.message },200);
+        res.status(200).json({ status: false, message: error.message }, 200);
     }
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -612,7 +624,7 @@ router.get('/my-application', auth, async (req, res) => {
         `, [user_id]);
 
         if (listener.length === 0)
-            return res.status(200).json({ status: false, message: 'Application not found.' },200);
+            return res.status(200).json({ status: false, message: 'Application not found.' }, 200);
 
         const { rows: languages } = await pool.query(`
             SELECT ul.language_id, l.language_name AS language,
@@ -640,9 +652,9 @@ router.get('/my-application', auth, async (req, res) => {
         `, [user_id]);
         l.interests = interests;
 
-        res.status(200).json({ status: true, data: l },200);
+        res.status(200).json({ status: true, data: l }, 200);
     } catch (error) {
-        res.status(200).json({ status: false, message: error.message },200);
+        res.status(200).json({ status: false, message: error.message }, 200);
     }
 });
 // POST /api/change-password
@@ -653,28 +665,28 @@ router.post('/change-password', auth, async (req, res) => {
         const { current_password, new_password, confirm_password } = req.body;
 
         if (!current_password || !new_password || !confirm_password)
-            return res.status(200).json({ status: false, message: 'current_password, new_password, and confirm_password are required.' },200);
+            return res.status(200).json({ status: false, message: 'current_password, new_password, and confirm_password are required.' }, 200);
 
         if (new_password !== confirm_password)
-            return res.status(200).json({ status: false, message: 'new_password and confirm_password do not match.' },200);
+            return res.status(200).json({ status: false, message: 'new_password and confirm_password do not match.' }, 200);
 
         if (new_password.length < 6)
-            return res.status(200).json({ status: false, message: 'New password must be at least 6 characters.' },200);
+            return res.status(200).json({ status: false, message: 'New password must be at least 6 characters.' }, 200);
 
         const { rows } = await pool.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
         if (rows.length === 0 || !rows[0].password)
-            return res.status(200).json({ status: false, message: 'User not found or no password set.' },200);
+            return res.status(200).json({ status: false, message: 'User not found or no password set.' }, 200);
 
         const isMatch = await bcrypt.compare(current_password, rows[0].password);
         if (!isMatch)
-            return res.status(200).json({ status: false, message: 'Current password is incorrect.' },200);
+            return res.status(200).json({ status: false, message: 'Current password is incorrect.' }, 200);
 
         const hashed = await bcrypt.hash(new_password, 12);
         await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashed, req.user.id]);
 
-        res.status(200).json({ status: true, message: 'Password changed successfully.' },200);
+        res.status(200).json({ status: true, message: 'Password changed successfully.' }, 200);
     } catch (error) {
-        res.status(200).json({ status: false, message: error.message },200);
+        res.status(200).json({ status: false, message: error.message }, 200);
     }
 });
 // POST /api/withdraw-application
@@ -690,19 +702,19 @@ router.post('/withdraw-application', auth, async (req, res) => {
         );
 
         if (rows.length === 0)
-            return res.status(200).json({ status: false, message: 'No application found.' },200);
+            return res.status(200).json({ status: false, message: 'No application found.' }, 200);
 
         if (Number(rows[0].application_status) !== 1)
-            return res.status(200).json({ status: false, message: 'Only pending (submitted) applications can be withdrawn.' },200);
+            return res.status(200).json({ status: false, message: 'Only pending (submitted) applications can be withdrawn.' }, 200);
 
         // Delete listener_details, languages, and reset user_type back to 'user'
         await pool.query('DELETE FROM listener_details WHERE user_id = $1', [user_id]);
         await pool.query('DELETE FROM listener_preferred_languages WHERE user_id = $1', [user_id]);
         await pool.query(`UPDATE users SET user_type = 'user' WHERE id = $1`, [user_id]);
 
-        res.status(200).json({ status: true, message: 'Application withdrawn successfully.' },200);
+        res.status(200).json({ status: true, message: 'Application withdrawn successfully.' }, 200);
     } catch (error) {
-        res.status(200).json({ status: false, message: error.message },200);
+        res.status(200).json({ status: false, message: error.message }, 200);
     }
 });
 // POST /api/update-languages
@@ -716,11 +728,11 @@ router.post('/update-languages', auth, async (req, res) => {
         try { languages = JSON.parse(req.body.languages || '[]'); } catch (_) { languages = req.body.languages || []; }
 
         if (!Array.isArray(languages) || languages.length === 0)
-            return res.status(200).json({ status: false, message: 'At least one language is required.' },200);
+            return res.status(200).json({ status: false, message: 'At least one language is required.' }, 200);
 
         const { rows } = await pool.query('SELECT user_id FROM listener_details WHERE user_id = $1', [user_id]);
         if (rows.length === 0)
-            return res.status(200).json({ status: false, message: 'Listener application not found.' },200);
+            return res.status(200).json({ status: false, message: 'Listener application not found.' }, 200);
 
         await pool.query('DELETE FROM listener_preferred_languages WHERE user_id = $1', [user_id]);
         for (const lang of languages) {
@@ -730,9 +742,9 @@ router.post('/update-languages', auth, async (req, res) => {
             );
         }
 
-        res.status(200).json({ status: true, message: 'Languages updated successfully.' },200);
+        res.status(200).json({ status: true, message: 'Languages updated successfully.' }, 200);
     } catch (error) {
-        res.status(200).json({ status: false, message: error.message },200);
+        res.status(200).json({ status: false, message: error.message }, 200);
     }
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -863,7 +875,7 @@ router.post('/delete-account', auth, async (req, res) => {
 // Authenticate listener via email/phone and password, and return user & application details
 router.post('/listener-login', async (req, res) => {
     try {
-        const { email, phone, password } = req.body;
+        const { email, phone, password } = req.body || {};
 
         if ((!email && !phone) || !password) {
             return res.status(200).json({
