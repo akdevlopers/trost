@@ -2510,4 +2510,232 @@ router.delete('/remove-saved-listener', auth, async (req, res) => {
     }
 });
 
+// =============================================================================
+// PACKAGE & WALLET PAYMENT ENDPOINTS
+// =============================================================================
+
+// GET /api/packages or /api/get-packages - Fetch available minute packages
+const getPackagesHandler = async (req, res) => {
+    try {
+        const { rows: packages } = await pool.query(
+            `SELECT id, package_name, minutes, price, is_popular, created_at 
+             FROM minute_packages 
+             WHERE status = TRUE 
+             ORDER BY minutes ASC`
+        );
+
+        const data = packages.map(pkg => ({
+            id: pkg.id,
+            package_name: pkg.package_name,
+            minutes: pkg.minutes,
+            price: parseFloat(pkg.price),
+            price_per_min: pkg.minutes > 0 ? parseFloat((pkg.price / pkg.minutes).toFixed(2)) : 0,
+            is_popular: pkg.is_popular,
+            created_at: pkg.created_at
+        }));
+
+        return res.status(200).json({
+            status: true,
+            message: "Packages fetched successfully.",
+            data
+        });
+    } catch (error) {
+        console.error("Get packages error:", error);
+        return res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+};
+
+router.get('/packages', auth, getPackagesHandler);
+router.get('/get-packages', auth, getPackagesHandler);
+
+// POST /api/make-payment or /api/purchase-package - Make payment for a package and add minutes to wallet
+const makePaymentHandler = async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const user_id = req.user.id;
+        let { package_id, payment_gateway, payment_id, status = 'success' } = req.body;
+
+        // 1. Validate package_id
+        if (package_id === undefined || package_id === null || package_id === '') {
+            return res.status(200).json({
+                status: false,
+                message: "package_id is required."
+            });
+        }
+
+        const parsedPackageId = Number(package_id);
+        if (isNaN(parsedPackageId) || !Number.isInteger(parsedPackageId) || parsedPackageId <= 0) {
+            return res.status(200).json({
+                status: false,
+                message: "package_id must be a valid positive integer."
+            });
+        }
+
+        // 2. Fetch package details
+        const { rows: packageRows } = await client.query(
+            `SELECT id, package_name, minutes, price, status 
+             FROM minute_packages 
+             WHERE id = $1`,
+            [parsedPackageId]
+        );
+
+        if (packageRows.length === 0) {
+            return res.status(200).json({
+                status: false,
+                message: "Package not found."
+            });
+        }
+
+        const selectedPackage = packageRows[0];
+        if (selectedPackage.status !== true) {
+            return res.status(200).json({
+                status: false,
+                message: "This package is currently inactive."
+            });
+        }
+
+        const packageMinutes = Number(selectedPackage.minutes);
+        const packagePrice = parseFloat(selectedPackage.price);
+
+        // 3. Normalize payment gateway and payment ID
+        const gateway = payment_gateway && typeof payment_gateway === 'string' && payment_gateway.trim()
+            ? payment_gateway.trim()
+            : 'Razorpay';
+
+        const paymentRefId = payment_id && typeof payment_id === 'string' && payment_id.trim()
+            ? payment_id.trim()
+            : `PAY_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+
+        const paymentStatus = typeof status === 'string' && status.trim().toLowerCase() === 'failed'
+            ? 'failed'
+            : (typeof status === 'string' && status.trim().toLowerCase() === 'pending' ? 'pending' : 'success');
+
+        await client.query("BEGIN");
+
+        // 4. Record payment entry
+        const { rows: paymentResult } = await client.query(
+            `INSERT INTO payments (user_id, package_id, amount, payment_gateway, payment_id, status, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())
+             RETURNING id, user_id, package_id, amount, payment_gateway, payment_id, status, created_at`,
+            [user_id, parsedPackageId, packagePrice, gateway, paymentRefId, paymentStatus]
+        );
+
+        const paymentRecord = paymentResult[0];
+
+        // If payment status is not 'success', do not credit minutes
+        if (paymentStatus !== 'success') {
+            await client.query("COMMIT");
+            return res.status(200).json({
+                status: false,
+                message: `Payment status is ${paymentStatus}. Minutes were not credited.`,
+                data: {
+                    payment: {
+                        ...paymentRecord,
+                        amount: parseFloat(paymentRecord.amount)
+                    },
+                    package: {
+                        id: selectedPackage.id,
+                        package_name: selectedPackage.package_name,
+                        minutes: packageMinutes,
+                        price: packagePrice
+                    }
+                }
+            });
+        }
+
+        // 5. Add minutes to user's wallet (user_minutes)
+        const { rows: existingMinutes } = await client.query(
+            `SELECT id, free_minutes, purchased_minutes, remaining_minutes 
+             FROM user_minutes 
+             WHERE user_id = $1`,
+            [user_id]
+        );
+
+        let updatedWallet;
+        if (existingMinutes.length === 0) {
+            const { rows: insertedWallet } = await client.query(
+                `INSERT INTO user_minutes (user_id, free_minutes, purchased_minutes, remaining_minutes, updated_at)
+                 VALUES ($1, 0, $2, $2, NOW())
+                 RETURNING id, free_minutes, purchased_minutes, remaining_minutes, updated_at`,
+                [user_id, packageMinutes]
+            );
+            updatedWallet = insertedWallet[0];
+        } else {
+            const { rows: updatedRows } = await client.query(
+                `UPDATE user_minutes
+                 SET purchased_minutes = purchased_minutes + $1,
+                     remaining_minutes = remaining_minutes + $1,
+                     updated_at = NOW()
+                 WHERE user_id = $2
+                 RETURNING id, free_minutes, purchased_minutes, remaining_minutes, updated_at`,
+                [packageMinutes, user_id]
+            );
+            updatedWallet = updatedRows[0];
+        }
+
+        // 6. Record transaction in minute_transactions
+        const { rows: transactionResult } = await client.query(
+            `INSERT INTO minute_transactions (user_id, type, source, minutes, amount, reference_id, created_at)
+             VALUES ($1, 'credit', 'package', $2, $3, $4, NOW())
+             RETURNING id, user_id, type, source, minutes, amount, reference_id, created_at`,
+            [user_id, packageMinutes, packagePrice, paymentRecord.id]
+        );
+
+        await client.query("COMMIT");
+
+        return res.status(200).json({
+            status: true,
+            message: "Payment successful and minutes added to wallet successfully.",
+            data: {
+                payment: {
+                    id: paymentRecord.id,
+                    user_id: paymentRecord.user_id,
+                    package_id: paymentRecord.package_id,
+                    amount: parseFloat(paymentRecord.amount),
+                    payment_gateway: paymentRecord.payment_gateway,
+                    payment_id: paymentRecord.payment_id,
+                    status: paymentRecord.status,
+                    created_at: paymentRecord.created_at
+                },
+                package: {
+                    id: selectedPackage.id,
+                    package_name: selectedPackage.package_name,
+                    minutes: packageMinutes,
+                    price: packagePrice
+                },
+                wallet: {
+                    total_minutes: updatedWallet.remaining_minutes,
+                    free_minutes: updatedWallet.free_minutes,
+                    purchased_minutes: updatedWallet.purchased_minutes,
+                    remaining_minutes: updatedWallet.remaining_minutes
+                },
+                transaction: {
+                    id: transactionResult[0].id,
+                    type: transactionResult[0].type,
+                    source: transactionResult[0].source,
+                    minutes: transactionResult[0].minutes,
+                    amount: parseFloat(transactionResult[0].amount),
+                    created_at: transactionResult[0].created_at
+                }
+            }
+        });
+
+    } catch (error) {
+        await client.query("ROLLBACK");
+        console.error("Make payment error:", error);
+        return res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    } finally {
+        client.release();
+    }
+};
+
+router.post('/make-payment', auth, makePaymentHandler);
+router.post('/purchase-package', auth, makePaymentHandler);
+
 module.exports = router;
