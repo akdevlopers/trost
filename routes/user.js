@@ -2974,6 +2974,120 @@ const attendCallHandler = async (req, res) => {
 router.post('/attend-call', auth, attendCallHandler);
 router.post('/accept-call', auth, attendCallHandler);
 
+// POST /api/decline-call or /api/reject-call
+const declineCallHandler = async (req, res) => {
+    try {
+        const auth_user_id = req.user.id;
+        const { conversation_id, call_id } = req.body ?? {};
+
+        const convId = conversation_id || call_id;
+
+        if (!convId) {
+            return res.status(200).json({
+                status: false,
+                message: "conversation_id is required."
+            });
+        }
+
+        const parsedId = Number(convId);
+        if (isNaN(parsedId) || !Number.isInteger(parsedId) || parsedId <= 0) {
+            return res.status(200).json({
+                status: false,
+                message: "conversation_id must be a valid positive integer."
+            });
+        }
+
+        // Fetch conversation and joined caller & listener details from DB
+        const { rows: convRows } = await pool.query(
+            `SELECT 
+                uc.id, 
+                uc.user_id, 
+                uc.listener_id, 
+                uc.room_id, 
+                uc.started_at, 
+                uc.ended_at, 
+                uc.status, 
+                uc.created_at,
+                u.name AS caller_name,
+                u.profile_photo AS caller_photo,
+                l.name AS listener_name,
+                l.profile_photo AS listener_photo,
+                ld.rating AS listener_rating,
+                ld.call_price
+             FROM user_conversations uc
+             LEFT JOIN users u ON u.id = uc.user_id
+             LEFT JOIN users l ON l.id = uc.listener_id
+             LEFT JOIN listener_details ld ON ld.user_id = uc.listener_id
+             WHERE uc.id = $1 AND (uc.listener_id = $2 OR uc.user_id = $2 OR uc.listener_id IS NULL)`,
+            [parsedId, auth_user_id]
+        );
+
+        if (convRows.length === 0) {
+            return res.status(200).json({
+                status: false,
+                message: "Call / Conversation not found or unauthorized."
+            });
+        }
+
+        const conversation = convRows[0];
+
+        if (conversation.status === 'completed' || conversation.status === 'cancelled' || conversation.status === 'declined' || conversation.status === 'rejected') {
+            return res.status(200).json({
+                status: false,
+                message: `Call is already ${conversation.status}.`
+            });
+        }
+
+        // Update status to 'declined' and ended_at to NOW()
+        const { rows: updatedRows } = await pool.query(
+            `UPDATE user_conversations
+             SET status = 'declined',
+                 ended_at = NOW()
+             WHERE id = $1
+             RETURNING id, user_id, listener_id, room_id, started_at, ended_at, status, created_at`,
+            [parsedId]
+        );
+
+        const updatedCall = updatedRows[0];
+        const BASE_URL = `${req.protocol}://${req.get('host')}`;
+
+        return res.status(200).json({
+            status: true,
+            message: "Call declined successfully.",
+            data: {
+                conversation_id: updatedCall.id,
+                room_id: updatedCall.room_id,
+                call_status: updatedCall.status,
+                started_at: updatedCall.started_at,
+                ended_at: updatedCall.ended_at,
+                created_at: updatedCall.created_at,
+                caller: {
+                    id: conversation.user_id,
+                    name: conversation.caller_name || `Caller #${conversation.user_id}`,
+                    profile_photo: conversation.caller_photo ? `${BASE_URL}/uploads/${conversation.caller_photo}` : null
+                },
+                listener: {
+                    id: conversation.listener_id || auth_user_id,
+                    name: conversation.listener_name || null,
+                    profile_photo: conversation.listener_photo ? `${BASE_URL}/uploads/${conversation.listener_photo}` : null,
+                    rating: conversation.listener_rating ? Number(conversation.listener_rating) : null,
+                    call_price: conversation.call_price ? Number(conversation.call_price) : null
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("Decline call error:", error);
+        return res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+};
+
+router.post('/decline-call', auth, declineCallHandler);
+router.post('/reject-call', auth, declineCallHandler);
+
 // POST /api/end-call - End a call and reduce minutes from wallet
 router.post('/end-call', auth, async (req, res) => {
     const client = await pool.connect();
