@@ -814,6 +814,7 @@ router.get('/conversations', auth, async (req, res) => {
         const { rows } = await pool.query(
             `SELECT
                 c.id,
+                c.room_id,
                 c.listener_id,
                 u.name AS listener_name,
                 u.profile_photo,
@@ -836,6 +837,7 @@ router.get('/conversations', auth, async (req, res) => {
 
         const conversations = rows.map(item => ({
             id: item.id,
+            room_id: item.room_id || null,
             listener_id: item.listener_id,
             listener_name: item.listener_name.trim(),
             profile_photo: item.profile_photo
@@ -2127,6 +2129,7 @@ router.get('/conversation/:id', auth, async (req, res) => {
         const { rows } = await pool.query(
             `SELECT
                 uc.id,
+                uc.room_id,
                 uc.started_at,
                 uc.ended_at,
 
@@ -2792,7 +2795,7 @@ router.post('/wallet-balance', auth, getWalletBalanceHandler);
 router.post('/start-call', auth, async (req, res) => {
     try {
         const user_id = req.user.id;
-        const { listener_id } = req.body ?? {};
+        const { listener_id, room_id } = req.body ?? {};
 
         // 1. Validate listener_id
         if (!listener_id) {
@@ -2854,12 +2857,17 @@ router.post('/start-call', auth, async (req, res) => {
             });
         }
 
-        // 4. Create conversation / call entry
+        // 4. Generate or assign room_id
+        const finalRoomId = (room_id && typeof room_id === 'string' && room_id.trim() !== "")
+            ? room_id.trim()
+            : `room_${user_id}_${parsedListenerId}_${Date.now()}`;
+
+        // 5. Create conversation / call entry
         const { rows: conversationRows } = await pool.query(
-            `INSERT INTO user_conversations (user_id, listener_id, started_at, status, created_at)
-             VALUES ($1, $2, NOW(), 'calling', NOW())
-             RETURNING id, user_id, listener_id, started_at, status, created_at`,
-            [user_id, parsedListenerId]
+            `INSERT INTO user_conversations (user_id, listener_id, room_id, started_at, status, created_at)
+             VALUES ($1, $2, $3, NOW(), 'calling', NOW())
+             RETURNING id, user_id, listener_id, room_id, started_at, status, created_at`,
+            [user_id, parsedListenerId, finalRoomId]
         );
 
         const conversation = conversationRows[0];
@@ -2870,6 +2878,7 @@ router.post('/start-call', auth, async (req, res) => {
             message: "Call initiated successfully.",
             data: {
                 conversation_id: conversation.id,
+                room_id: conversation.room_id,
                 call_status: conversation.status,
                 started_at: conversation.started_at,
                 wallet_remaining_minutes: currentMinutes,
@@ -2943,7 +2952,7 @@ const attendCallHandler = async (req, res) => {
              SET status = 'in_progress',
                  started_at = NOW()
              WHERE id = $1
-             RETURNING id, user_id, listener_id, started_at, status, created_at`,
+             RETURNING id, user_id, listener_id, room_id, started_at, status, created_at`,
             [parsedId]
         );
 
@@ -3050,7 +3059,7 @@ router.post('/end-call', auth, async (req, res) => {
              SET ended_at = NOW(),
                  status = $1
              WHERE id = $2
-             RETURNING id, user_id, listener_id, started_at, ended_at, status`,
+             RETURNING id, user_id, listener_id, room_id, started_at, ended_at, status`,
             [finalStatus, parsedConvId]
         );
 

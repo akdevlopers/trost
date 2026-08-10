@@ -1931,7 +1931,7 @@ router.get('/get-conversations', auth, role('admin'), async (req, res) => {
 
         const { rows: calls } = await pool.query(
             `SELECT
-                uc.id, uc.started_at, uc.ended_at, uc.status, uc.created_at,
+                uc.id, uc.room_id, uc.started_at, uc.ended_at, uc.status, uc.created_at,
                 EXTRACT(EPOCH FROM (uc.ended_at - uc.started_at)) AS duration_seconds,
                 u.id AS user_id, u.name AS user_name, u.email AS user_email, u.profile_photo AS user_profile_photo,
                 l.id AS listener_id, l.name AS listener_name, l.email AS listener_email, l.profile_photo AS listener_profile_photo

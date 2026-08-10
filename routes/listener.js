@@ -1053,7 +1053,7 @@ router.post('/listener/dashboard', auth, async (req, res) => {
 
         // 5. Fetch completed sessions
         const { rows: dbSessions } = await pool.query(
-            `SELECT uc.id, uc.started_at, uc.ended_at, u.name AS user_name, lr.rating, lr.review
+            `SELECT uc.id, uc.room_id, uc.started_at, uc.ended_at, u.name AS user_name, lr.rating, lr.review
              FROM user_conversations uc
              JOIN users u ON uc.user_id = u.id
              LEFT JOIN listener_reviews lr ON lr.listener_id = uc.listener_id AND lr.user_id = uc.user_id
@@ -1093,11 +1093,11 @@ router.post('/listener/dashboard', auth, async (req, res) => {
 
         // Fetch call queue dynamically from DB
         const { rows: queueRows } = await pool.query(
-            `SELECT uc.id, uc.created_at, uc.started_at, u.name AS user_name
+            `SELECT uc.id, uc.room_id, uc.created_at, uc.started_at, u.name AS user_name
              FROM user_conversations uc
              JOIN users u ON uc.user_id = u.id
              WHERE (uc.listener_id = $1 OR uc.listener_id IS NULL)
-               AND uc.status IN ('pending', 'waiting', 'requested')
+               AND uc.status IN ('pending', 'waiting', 'requested', 'calling')
                AND uc.ended_at IS NULL
              ORDER BY uc.created_at ASC`,
             [user_id]
@@ -1140,6 +1140,8 @@ router.post('/listener/dashboard', auth, async (req, res) => {
                 }
                 return {
                     caller_id: `#${uc.id}`,
+                    conversation_id: uc.id,
+                    room_id: uc.room_id || null,
                     caller_name: `Anonymous caller #${uc.id}`,
                     wait_time: waitTime,
                     call_type: uc.id % 2 === 0 ? "Voice call" : "Text / Voice",
@@ -1151,6 +1153,8 @@ router.post('/listener/dashboard', auth, async (req, res) => {
             incomingCallQueue = [
                 {
                     caller_id: "#402",
+                    conversation_id: 402,
+                    room_id: "room_402",
                     caller_name: "Anonymous caller #402",
                     topic: "Anxiety & Overwhelm",
                     wait_time: "45 sec ago",
@@ -1159,6 +1163,8 @@ router.post('/listener/dashboard', auth, async (req, res) => {
                 },
                 {
                     caller_id: "#119",
+                    conversation_id: 119,
+                    room_id: "room_119",
                     caller_name: "Anonymous caller #119",
                     topic: "Loneliness & Isolation",
                     wait_time: "2 min ago",
@@ -1167,6 +1173,8 @@ router.post('/listener/dashboard', auth, async (req, res) => {
                 },
                 {
                     caller_id: "#884",
+                    conversation_id: 884,
+                    room_id: "room_884",
                     caller_name: "Anonymous caller #884",
                     topic: "Work Burnout",
                     wait_time: "3 min ago",
@@ -1200,6 +1208,7 @@ router.post('/listener/dashboard', auth, async (req, res) => {
                 const earnings = durationMin * callPrice;
                 return {
                     id: s.id,
+                    room_id: s.room_id || null,
                     topic: s.review ? s.review.substring(0, 20) + "..." : "Support Session",
                     time: start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
                     rating: s.rating ? Number(s.rating).toFixed(1) : "5.0",
@@ -1210,10 +1219,10 @@ router.post('/listener/dashboard', auth, async (req, res) => {
         } else {
             // High fidelity mockup fallback
             completedSessionsList = [
-                { id: "s1", topic: "Work stress", time: "8:12 PM", rating: "5.0", duration: "18m", earnings: "$10.80" },
-                { id: "s2", topic: "Sleep & Insomnia", time: "7:30 PM", rating: "5.0", duration: "12m", earnings: "$3.60" },
-                { id: "s3", topic: "Relationships", time: "6:55 PM", rating: "4.0", duration: "26m", earnings: "$15.40" },
-                { id: "s4", topic: "Anxiety", time: "5:40 PM", rating: "5.0", duration: "10m", earnings: "Trial" }
+                { id: "s1", room_id: "room_s1", topic: "Work stress", time: "8:12 PM", rating: "5.0", duration: "18m", earnings: "$10.80" },
+                { id: "s2", room_id: "room_s2", topic: "Sleep & Insomnia", time: "7:30 PM", rating: "5.0", duration: "12m", earnings: "$3.60" },
+                { id: "s3", room_id: "room_s3", topic: "Relationships", time: "6:55 PM", rating: "4.0", duration: "26m", earnings: "$15.40" },
+                { id: "s4", room_id: "room_s4", topic: "Anxiety", time: "5:40 PM", rating: "5.0", duration: "10m", earnings: "Trial" }
             ];
         }
 
@@ -1289,11 +1298,11 @@ router.post('/listener/calls-queue', auth, async (req, res) => {
 
         // Fetch call queue dynamically from DB
         const { rows: queueRows } = await pool.query(
-            `SELECT uc.id, uc.created_at, uc.started_at, u.name AS user_name
+            `SELECT uc.id, uc.room_id, uc.created_at, uc.started_at, u.name AS user_name
              FROM user_conversations uc
              JOIN users u ON uc.user_id = u.id
              WHERE (uc.listener_id = $1 OR uc.listener_id IS NULL)
-               AND uc.status IN ('pending', 'waiting', 'requested')
+               AND uc.status IN ('pending', 'waiting', 'requested', 'calling')
                AND uc.ended_at IS NULL
              ORDER BY uc.created_at ASC`,
             [user_id]
@@ -1336,6 +1345,8 @@ router.post('/listener/calls-queue', auth, async (req, res) => {
                 }
                 return {
                     caller_id: `#${uc.id}`,
+                    conversation_id: uc.id,
+                    room_id: uc.room_id || null,
                     caller_name: `Anonymous caller #${uc.id}`,
                     wait_time: waitTime,
                     call_type: uc.id % 2 === 0 ? "Voice call" : "Text / Voice",
@@ -1347,6 +1358,8 @@ router.post('/listener/calls-queue', auth, async (req, res) => {
             queue = [
                 {
                     caller_id: "#402",
+                    conversation_id: 402,
+                    room_id: "room_402",
                     caller_name: "Anonymous caller #402",
                     topic: "Anxiety & Overwhelm",
                     wait_time: "45 sec ago",
@@ -1355,6 +1368,8 @@ router.post('/listener/calls-queue', auth, async (req, res) => {
                 },
                 {
                     caller_id: "#119",
+                    conversation_id: 119,
+                    room_id: "room_119",
                     caller_name: "Anonymous caller #119",
                     topic: "Loneliness & Isolation",
                     wait_time: "2 min ago",
@@ -1363,6 +1378,8 @@ router.post('/listener/calls-queue', auth, async (req, res) => {
                 },
                 {
                     caller_id: "#884",
+                    conversation_id: 884,
+                    room_id: "room_884",
                     caller_name: "Anonymous caller #884",
                     topic: "Work Burnout",
                     wait_time: "3 min ago",
@@ -1476,9 +1493,9 @@ router.post('/listener/toggle-status', auth, async (req, res) => {
     }
 });
 
-// POST /api/listener/call-history
-// Fetch call history dynamically from DB along with comprehensive Earnings & Payout Analytics (supporting 7days, 30days, and thisyear filters)
-router.post('/listener/call-history', auth, async (req, res) => {
+// POST or GET /api/listener/call-history (and /api/listener/call-logs, /api/listener/call-log)
+// Fetch call history / call logs dynamically from DB along with comprehensive Earnings & Payout Analytics (supporting 7days, 30days, and thisyear filters)
+const listenerCallHistoryHandler = async (req, res) => {
     try {
         const user_id = req.user.id;
 
@@ -1491,10 +1508,11 @@ router.post('/listener/call-history', auth, async (req, res) => {
         }
 
         const body = req.body || {};
-        const search = body.search || '';
-        const page = parseInt(body.page) || 1;
-        const limit = parseInt(body.limit) || 10;
-        const filter = body.filter || '7days'; // can be '7days', '30days', 'thisyear'
+        const query = req.query || {};
+        const search = body.search || query.search || '';
+        const page = parseInt(body.page || query.page) || 1;
+        const limit = parseInt(body.limit || query.limit) || 10;
+        const filter = body.filter || query.filter || '7days'; // can be '7days', '30days', 'thisyear'
 
         // 1. Determine filter query intervals for stats and charts
         let filterInterval = "INTERVAL '7 days'";
@@ -1640,6 +1658,7 @@ router.post('/listener/call-history', auth, async (req, res) => {
         const dataQuery = `
             SELECT 
                 uc.id,
+                uc.room_id,
                 uc.started_at,
                 uc.ended_at,
                 uc.status,
@@ -1705,6 +1724,7 @@ router.post('/listener/call-history', auth, async (req, res) => {
 
             return {
                 id: uc.id,
+                room_id: uc.room_id || null,
                 caller_name: `Anonymous Caller #${uc.id}`,
                 topic: topics[uc.id % topics.length],
                 tag: tags[uc.id % tags.length],
@@ -1724,11 +1744,11 @@ router.post('/listener/call-history', auth, async (req, res) => {
         } else {
             // High fidelity mockup fallback if DB is empty
             const mockHistory = [
-                { id: 402, topic: "Anxiety & Overwhelm", waited: 18 * 60 + 42, date: new Date(), rate: 0.60, status: "completed" },
-                { id: 119, topic: "Loneliness & Isolation", waited: 12 * 60 + 10, date: new Date(), rate: 0.60, status: "completed" },
-                { id: 884, topic: "Work Burnout", waited: 26 * 60 + 5, date: new Date(), rate: 0.60, status: "completed" },
-                { id: 903, topic: "Grief & Loss", waited: 45 * 60 + 20, date: new Date(Date.now() - 24 * 60 * 60 * 1000), rate: 0.60, status: "completed" },
-                { id: 312, topic: "Relationship stress", waited: 22 * 60 + 15, date: new Date(Date.now() - 24 * 60 * 60 * 1000), rate: 0.60, status: "completed" }
+                { id: 402, room_id: "room_402", topic: "Anxiety & Overwhelm", waited: 18 * 60 + 42, date: new Date(), rate: 0.60, status: "completed" },
+                { id: 119, room_id: "room_119", topic: "Loneliness & Isolation", waited: 12 * 60 + 10, date: new Date(), rate: 0.60, status: "completed" },
+                { id: 884, room_id: "room_884", topic: "Work Burnout", waited: 26 * 60 + 5, date: new Date(), rate: 0.60, status: "completed" },
+                { id: 903, room_id: "room_903", topic: "Grief & Loss", waited: 45 * 60 + 20, date: new Date(Date.now() - 24 * 60 * 60 * 1000), rate: 0.60, status: "completed" },
+                { id: 312, room_id: "room_312", topic: "Relationship stress", waited: 22 * 60 + 15, date: new Date(Date.now() - 24 * 60 * 60 * 1000), rate: 0.60, status: "completed" }
             ];
 
             resultList = mockHistory.map(m => {
@@ -1737,6 +1757,7 @@ router.post('/listener/call-history', auth, async (req, res) => {
                 const earned = m.waited * (m.rate / 60);
                 return {
                     id: m.id,
+                    room_id: m.room_id,
                     caller_name: `Anonymous Caller #${m.id}`,
                     topic: m.topic,
                     tag: tags[m.id % tags.length],
@@ -1790,7 +1811,18 @@ router.post('/listener/call-history', auth, async (req, res) => {
             message: error.message
         });
     }
-});
+};
+
+router.post('/listener/call-history', auth, listenerCallHistoryHandler);
+router.get('/listener/call-history', auth, listenerCallHistoryHandler);
+router.post('/listener/call-logs', auth, listenerCallHistoryHandler);
+router.get('/listener/call-logs', auth, listenerCallHistoryHandler);
+router.post('/listener/call-log', auth, listenerCallHistoryHandler);
+router.get('/listener/call-log', auth, listenerCallHistoryHandler);
+router.post('/call-logs', auth, listenerCallHistoryHandler);
+router.get('/call-logs', auth, listenerCallHistoryHandler);
+router.post('/call-log', auth, listenerCallHistoryHandler);
+router.get('/call-log', auth, listenerCallHistoryHandler);
 
 // POST /api/listener/reviews
 // Fetch caller reviews dynamically from DB with pagination and dynamic time-ago formatting (e.g. 2 hours ago)
