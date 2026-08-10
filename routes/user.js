@@ -318,7 +318,7 @@ router.get('/fluency-list', auth, async (req, res) => {
 });
 
 // GET /api/vibes-list
-router.get('/vibes-list',async (req, res) => {
+router.get('/vibes-list', async (req, res) => {
     try {
 
         const { rows: vibes } = await pool.query(`
@@ -681,7 +681,7 @@ router.get('/account', auth, async (req, res) => {
         const selected_interests = userInterests.map(row => row.interest_id);
 
         // 3. Languages List
-       const { rows: languages } = await pool.query(
+        const { rows: languages } = await pool.query(
             `SELECT
                 id,
                 language_name
@@ -1412,7 +1412,7 @@ router.post('/update-card', auth, async (req, res) => {
             [
                 provider,
                 card_holder_name,
-                
+
                 card_number,
                 card_last4,
                 cvv,
@@ -2556,7 +2556,7 @@ const makePaymentHandler = async (req, res) => {
     const client = await pool.connect();
     try {
         const user_id = req.user.id;
-        let { package_id, payment_gateway, payment_id, status = 'success' } = req.body;
+        let { package_id, payment_gateway, payment_id, status = 'success' } = req.body ?? null;
 
         // 1. Validate package_id
         if (package_id === undefined || package_id === null || package_id === '') {
@@ -2737,5 +2737,436 @@ const makePaymentHandler = async (req, res) => {
 
 router.post('/make-payment', auth, makePaymentHandler);
 router.post('/purchase-package', auth, makePaymentHandler);
+
+// =============================================================================
+// WALLET BALANCE & CALL MANAGEMENT ENDPOINTS
+// =============================================================================
+
+// GET /api/wallet-balance - Get remaining minutes in wallet
+const getWalletBalanceHandler = async (req, res) => {
+    try {
+        const user_id = req.user.id;
+
+        const { rows: balanceData } = await pool.query(
+            `SELECT free_minutes, purchased_minutes, remaining_minutes, updated_at 
+             FROM user_minutes 
+             WHERE user_id = $1`,
+            [user_id]
+        );
+
+        let balance = {
+            total_minutes: 0,
+            free_minutes: 0,
+            purchased_minutes: 0,
+            remaining_minutes: 0,
+            updated_at: null
+        };
+
+        if (balanceData.length > 0) {
+            balance = {
+                total_minutes: balanceData[0].remaining_minutes,
+                free_minutes: balanceData[0].free_minutes,
+                purchased_minutes: balanceData[0].purchased_minutes,
+                remaining_minutes: balanceData[0].remaining_minutes,
+                updated_at: balanceData[0].updated_at
+            };
+        }
+
+        return res.status(200).json({
+            status: true,
+            message: "Wallet balance fetched successfully.",
+            data: balance
+        });
+    } catch (error) {
+        console.error("Get wallet balance error:", error);
+        return res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+};
+
+router.post('/wallet-balance', auth, getWalletBalanceHandler);
+
+// POST /api/start-call - Initiate a call with a listener
+router.post('/start-call', auth, async (req, res) => {
+    try {
+        const user_id = req.user.id;
+        const { listener_id } = req.body ?? {};
+
+        // 1. Validate listener_id
+        if (!listener_id) {
+            return res.status(200).json({
+                status: false,
+                message: "listener_id is required."
+            });
+        }
+
+        const parsedListenerId = Number(listener_id);
+        if (isNaN(parsedListenerId) || !Number.isInteger(parsedListenerId) || parsedListenerId <= 0) {
+            return res.status(200).json({
+                status: false,
+                message: "listener_id must be a valid positive integer."
+            });
+        }
+
+        if (user_id === parsedListenerId) {
+            return res.status(200).json({
+                status: false,
+                message: "You cannot start a call with yourself."
+            });
+        }
+
+        // 2. Check listener exists & is a listener
+        const { rows: listenerRows } = await pool.query(
+            `SELECT u.id, u.name, u.email, u.profile_photo, ld.available_now, ld.rating, ld.call_price
+             FROM users u
+             LEFT JOIN listener_details ld ON ld.user_id = u.id
+             WHERE u.id = $1 AND u.user_type = 'listener'`,
+            [parsedListenerId]
+        );
+
+        if (listenerRows.length === 0) {
+            return res.status(200).json({
+                status: false,
+                message: "Listener not found."
+            });
+        }
+
+        const listener = listenerRows[0];
+
+        // 3. Check user minute balance in wallet
+        const { rows: balanceRows } = await pool.query(
+            `SELECT remaining_minutes, free_minutes, purchased_minutes 
+             FROM user_minutes 
+             WHERE user_id = $1`,
+            [user_id]
+        );
+
+        const currentMinutes = balanceRows.length > 0 ? balanceRows[0].remaining_minutes : 0;
+        if (currentMinutes <= 0) {
+            return res.status(200).json({
+                status: false,
+                message: "Insufficient minutes in wallet. Please recharge to make a call.",
+                data: {
+                    remaining_minutes: 0
+                }
+            });
+        }
+
+        // 4. Create conversation / call entry
+        const { rows: conversationRows } = await pool.query(
+            `INSERT INTO user_conversations (user_id, listener_id, started_at, status, created_at)
+             VALUES ($1, $2, NOW(), 'calling', NOW())
+             RETURNING id, user_id, listener_id, started_at, status, created_at`,
+            [user_id, parsedListenerId]
+        );
+
+        const conversation = conversationRows[0];
+        const BASE_URL = `${req.protocol}://${req.get('host')}`;
+
+        return res.status(200).json({
+            status: true,
+            message: "Call initiated successfully.",
+            data: {
+                conversation_id: conversation.id,
+                call_status: conversation.status,
+                started_at: conversation.started_at,
+                wallet_remaining_minutes: currentMinutes,
+                listener: {
+                    id: listener.id,
+                    name: listener.name,
+                    profile_photo: listener.profile_photo ? `${BASE_URL}/uploads/${listener.profile_photo}` : null,
+                    rating: listener.rating,
+                    available_now: listener.available_now
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("Start call error:", error);
+        return res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
+// POST /api/attend-call or /api/accept-call - Attend / Accept an incoming call
+const attendCallHandler = async (req, res) => {
+    try {
+        const user_id = req.user.id;
+        const conversation_id = req.body?.conversation_id || req.body?.call_id;
+
+        if (!conversation_id) {
+            return res.status(200).json({
+                status: false,
+                message: "conversation_id is required."
+            });
+        }
+
+        const parsedId = Number(conversation_id);
+        if (isNaN(parsedId) || !Number.isInteger(parsedId) || parsedId <= 0) {
+            return res.status(200).json({
+                status: false,
+                message: "conversation_id must be a valid positive integer."
+            });
+        }
+
+        // Fetch conversation
+        const { rows: convRows } = await pool.query(
+            `SELECT id, user_id, listener_id, started_at, ended_at, status 
+             FROM user_conversations 
+             WHERE id = $1 AND (user_id = $2 OR listener_id = $2)`,
+            [parsedId, user_id]
+        );
+
+        if (convRows.length === 0) {
+            return res.status(200).json({
+                status: false,
+                message: "Conversation not found or unauthorized."
+            });
+        }
+
+        const conversation = convRows[0];
+
+        if (conversation.status === 'completed' || conversation.status === 'cancelled') {
+            return res.status(200).json({
+                status: false,
+                message: `Call is already ${conversation.status}.`
+            });
+        }
+
+        // Update status to 'in_progress' and set started_at to current timestamp
+        const { rows: updatedRows } = await pool.query(
+            `UPDATE user_conversations
+             SET status = 'in_progress',
+                 started_at = NOW()
+             WHERE id = $1
+             RETURNING id, user_id, listener_id, started_at, status, created_at`,
+            [parsedId]
+        );
+
+        return res.status(200).json({
+            status: true,
+            message: "Call attended and connected successfully.",
+            data: updatedRows[0]
+        });
+
+    } catch (error) {
+        console.error("Attend call error:", error);
+        return res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+};
+
+router.post('/attend-call', auth, attendCallHandler);
+router.post('/accept-call', auth, attendCallHandler);
+
+// POST /api/end-call - End a call and reduce minutes from wallet
+router.post('/end-call', auth, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const auth_user_id = req.user.id;
+        const { conversation_id, call_id, duration_seconds } = req.body ?? {};
+
+        const convId = conversation_id || call_id;
+        if (!convId) {
+            return res.status(200).json({
+                status: false,
+                message: "conversation_id is required."
+            });
+        }
+
+        const parsedConvId = Number(convId);
+        if (isNaN(parsedConvId) || !Number.isInteger(parsedConvId) || parsedConvId <= 0) {
+            return res.status(200).json({
+                status: false,
+                message: "conversation_id must be a valid positive integer."
+            });
+        }
+
+        await client.query("BEGIN");
+
+        // 1. Fetch conversation with row lock & exact db elapsed duration
+        const { rows: convRows } = await client.query(
+            `SELECT uc.id, uc.user_id, uc.listener_id, uc.started_at, uc.ended_at, uc.status,
+                    EXTRACT(EPOCH FROM (NOW() - uc.started_at))::int AS db_elapsed_seconds,
+                    u.name as listener_name, ld.call_price
+             FROM user_conversations uc
+             LEFT JOIN users u ON u.id = uc.listener_id
+             LEFT JOIN listener_details ld ON ld.user_id = uc.listener_id
+             WHERE uc.id = $1 AND (uc.user_id = $2 OR uc.listener_id = $2)
+             FOR UPDATE OF uc`,
+            [parsedConvId, auth_user_id]
+        );
+
+        if (convRows.length === 0) {
+            await client.query("ROLLBACK");
+            return res.status(200).json({
+                status: false,
+                message: "Conversation not found or unauthorized."
+            });
+        }
+
+        const conversation = convRows[0];
+
+        if (conversation.status === 'completed' || conversation.status === 'cancelled') {
+            await client.query("ROLLBACK");
+            return res.status(200).json({
+                status: false,
+                message: `Call has already been ended (status: ${conversation.status}).`
+            });
+        }
+
+        const callerUserId = conversation.user_id;
+        const listenerId = conversation.listener_id;
+
+        // 2. Calculate duration in seconds and minutes directly from DB started_at
+        let durationSec = 0;
+        if (duration_seconds !== undefined && !isNaN(Number(duration_seconds)) && Number(duration_seconds) >= 0) {
+            durationSec = Math.floor(Number(duration_seconds));
+        } else {
+            durationSec = Math.max(0, Number(conversation.db_elapsed_seconds) || 0);
+        }
+
+        let finalStatus = 'completed';
+        let minutesUsed = 0;
+
+        // If the call was never attended / accepted (still 'calling'), do NOT charge minutes
+        if (conversation.status === 'calling') {
+            finalStatus = 'cancelled';
+            minutesUsed = 0;
+        } else {
+            // If call was connected ('in_progress'), bill by minute (ceiling to whole minutes, min 1 min)
+            minutesUsed = durationSec > 0 ? Math.ceil(durationSec / 60) : 1;
+        }
+
+        // 3. Update conversation record
+        const { rows: updatedConvRows } = await client.query(
+            `UPDATE user_conversations
+             SET ended_at = NOW(),
+                 status = $1
+             WHERE id = $2
+             RETURNING id, user_id, listener_id, started_at, ended_at, status`,
+            [finalStatus, parsedConvId]
+        );
+
+        let updatedWallet = null;
+        let actualDeducted = 0;
+        let transactionRecord = null;
+
+        // 4. If minutes are to be deducted, update user_minutes wallet
+        if (minutesUsed > 0 && finalStatus === 'completed') {
+            // Fetch caller's wallet
+            const { rows: walletRows } = await client.query(
+                `SELECT id, free_minutes, purchased_minutes, remaining_minutes 
+                 FROM user_minutes 
+                 WHERE user_id = $1 
+                 FOR UPDATE`,
+                [callerUserId]
+            );
+
+            if (walletRows.length > 0) {
+                const currentWallet = walletRows[0];
+                const currentRemaining = currentWallet.remaining_minutes || 0;
+                const currentFree = currentWallet.free_minutes || 0;
+                const currentPurchased = currentWallet.purchased_minutes || 0;
+
+                // Cap deduction by available remaining minutes
+                actualDeducted = Math.min(currentRemaining, minutesUsed);
+
+                const freeDeduct = Math.min(currentFree, actualDeducted);
+                const purchasedDeduct = Math.max(0, actualDeducted - freeDeduct);
+
+                const newFree = Math.max(0, currentFree - freeDeduct);
+                const newPurchased = Math.max(0, currentPurchased - purchasedDeduct);
+                const newRemaining = Math.max(0, currentRemaining - actualDeducted);
+
+                const { rows: savedWallet } = await client.query(
+                    `UPDATE user_minutes
+                     SET free_minutes = $1,
+                         purchased_minutes = $2,
+                         remaining_minutes = $3,
+                         updated_at = NOW()
+                     WHERE user_id = $4
+                     RETURNING id, free_minutes, purchased_minutes, remaining_minutes, updated_at`,
+                    [newFree, newPurchased, newRemaining, callerUserId]
+                );
+                updatedWallet = savedWallet[0];
+            } else {
+                // If no record existed, create empty one
+                const { rows: newWallet } = await client.query(
+                    `INSERT INTO user_minutes (user_id, free_minutes, purchased_minutes, remaining_minutes, updated_at)
+                     VALUES ($1, 0, 0, 0, NOW())
+                     RETURNING id, free_minutes, purchased_minutes, remaining_minutes, updated_at`,
+                    [callerUserId]
+                );
+                updatedWallet = newWallet[0];
+            }
+
+            // 5. Record debit in minute_transactions
+            if (actualDeducted > 0) {
+                const callPricePerMin = conversation.call_price ? parseFloat(conversation.call_price) : 0;
+                const totalCallAmount = parseFloat((callPricePerMin * actualDeducted).toFixed(2));
+
+                const { rows: txRows } = await client.query(
+                    `INSERT INTO minute_transactions (user_id, listener_id, type, source, minutes, amount, reference_id, created_at)
+                     VALUES ($1, $2, 'debit', 'call', $3, $4, $5, NOW())
+                     RETURNING id, user_id, listener_id, type, source, minutes, amount, reference_id, created_at`,
+                    [callerUserId, listenerId, -actualDeducted, totalCallAmount, parsedConvId]
+                );
+                transactionRecord = txRows[0];
+            }
+
+            // 6. Increment listener total calls count
+            await client.query(
+                `UPDATE listener_details 
+                 SET total_calls = COALESCE(total_calls, 0) + 1,
+                     updated_at = NOW()
+                 WHERE user_id = $1`,
+                [listenerId]
+            );
+        }
+
+        await client.query("COMMIT");
+
+        return res.status(200).json({
+            status: true,
+            message: "Call ended successfully and minutes updated.",
+            data: {
+                conversation: updatedConvRows[0],
+                duration_seconds: durationSec,
+                duration_minutes: minutesUsed,
+                minutes_deducted: actualDeducted,
+                wallet: updatedWallet ? {
+                    total_minutes: updatedWallet.remaining_minutes,
+                    free_minutes: updatedWallet.free_minutes,
+                    purchased_minutes: updatedWallet.purchased_minutes,
+                    remaining_minutes: updatedWallet.remaining_minutes
+                } : null,
+                transaction: transactionRecord ? {
+                    id: transactionRecord.id,
+                    type: transactionRecord.type,
+                    source: transactionRecord.source,
+                    minutes_change: transactionRecord.minutes,
+                    created_at: transactionRecord.created_at
+                } : null
+            }
+        });
+
+    } catch (error) {
+        await client.query("ROLLBACK");
+        console.error("End call error:", error);
+        return res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    } finally {
+        client.release();
+    }
+});
 
 module.exports = router;
