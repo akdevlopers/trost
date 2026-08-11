@@ -4334,7 +4334,7 @@ router.get('/call-earnings-logs', auth, role('admin'), async (req, res) => {
 // Summary overview of all listeners with unsettled, settled balances, and call totals
 router.get('/listeners-settlement-summary', auth, role('admin'), async (req, res) => {
     try {
-        const { search, sort_by } = req.query;
+        const { listener_id, search, status, from_date, to_date, sort_by } = req.query;
         const page = Math.max(1, parseInt(req.query.page || 1));
         const limit = Math.max(1, parseInt(req.query.limit || 20));
         const offset = (page - 1) * limit;
@@ -4342,9 +4342,29 @@ router.get('/listeners-settlement-summary', auth, role('admin'), async (req, res
         const conditions = ["u.user_type = 'listener'"];
         const params = [];
 
+        if (listener_id) {
+            conditions.push(`u.id = $${params.length + 1}`);
+            params.push(Number(listener_id));
+        }
+
+        if (status !== undefined && status !== null && status !== '') {
+            conditions.push(`ld.application_status = $${params.length + 1}`);
+            params.push(Number(status));
+        }
+
         if (search && search.trim()) {
             conditions.push(`(u.name ILIKE $${params.length + 1} OR u.email ILIKE $${params.length + 2} OR u.phone ILIKE $${params.length + 3})`);
             params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
+        }
+
+        if (from_date && from_date.trim()) {
+            conditions.push(`u.created_at >= $${params.length + 1}`);
+            params.push(from_date.trim());
+        }
+
+        if (to_date && to_date.trim()) {
+            conditions.push(`u.created_at <= $${params.length + 1}`);
+            params.push(to_date.trim());
         }
 
         const WHERE = `WHERE ` + conditions.join(' AND ');
