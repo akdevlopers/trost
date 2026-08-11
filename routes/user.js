@@ -417,8 +417,7 @@ router.get('/home', auth, async (req, res) => {
             if (user.profile_photo) {
                 user.profile_photo = `${BASE_URL}/uploads/${user.profile_photo}`;
             }
-            // Mocking streak since there's no check-in table/column yet
-            user.streak = 4;
+            user.streak = 0;
         }
 
         // Available count
@@ -3089,7 +3088,7 @@ router.post('/decline-call', auth, declineCallHandler);
 router.post('/reject-call', auth, declineCallHandler);
 
 // POST /api/end-call - End a call and reduce minutes from wallet
-router.post('/end-call', auth, async (req, res) => {
+const endCallHandler = async (req, res) => {
     const client = await pool.connect();
     try {
         const auth_user_id = req.user.id;
@@ -3180,8 +3179,12 @@ router.post('/end-call', auth, async (req, res) => {
         let updatedWallet = null;
         let actualDeducted = 0;
         let transactionRecord = null;
+        let listenerEarnedAmount = 0;
+        let listenerRatePerMin = 0.20;
+        let callEarningsLogRecord = null;
+        let updatedListenerData = null;
 
-        // 4. If minutes are to be deducted, update user_minutes wallet
+        // 4. If minutes are to be deducted, update user_minutes wallet and calculate listener earnings
         if (minutesUsed > 0 && finalStatus === 'completed') {
             // Fetch caller's wallet
             const { rows: walletRows } = await client.query(
@@ -3244,14 +3247,38 @@ router.post('/end-call', auth, async (req, res) => {
                 transactionRecord = txRows[0];
             }
 
-            // 6. Increment listener total calls count
-            await client.query(
+            // 6. Fetch configured listener rate per minute from app_settings
+            const { rows: settingRows } = await client.query(
+                `SELECT setting_value FROM app_settings WHERE setting_key = 'listener_rate_per_minute' LIMIT 1`
+            );
+            if (settingRows.length > 0 && settingRows[0].setting_value !== null && settingRows[0].setting_value !== undefined && !isNaN(Number(settingRows[0].setting_value))) {
+                listenerRatePerMin = parseFloat(Number(settingRows[0].setting_value).toFixed(2));
+            }
+
+            // Calculate listener earned amount
+            const billedMinutes = minutesUsed;
+            listenerEarnedAmount = parseFloat((billedMinutes * listenerRatePerMin).toFixed(2));
+
+            // 7. Increment listener total calls count and unsettled_amount
+            const { rows: listenerUpdateRows } = await client.query(
                 `UPDATE listener_details 
                  SET total_calls = COALESCE(total_calls, 0) + 1,
+                     unsettled_amount = COALESCE(unsettled_amount, 0) + $1,
                      updated_at = NOW()
-                 WHERE user_id = $1`,
-                [listenerId]
+                 WHERE user_id = $2
+                 RETURNING user_id, unsettled_amount, settled_amount, total_calls`,
+                [listenerEarnedAmount, listenerId]
             );
+            updatedListenerData = listenerUpdateRows[0] || null;
+
+            // 8. Store in call_earnings_logs table
+            const { rows: logRows } = await client.query(
+                `INSERT INTO call_earnings_logs (call_id, listener_id, user_id, duration_seconds, total_minutes, rate_per_minute, amount, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                 RETURNING id, call_id, listener_id, user_id, duration_seconds, total_minutes, rate_per_minute, amount, created_at`,
+                [parsedConvId, listenerId, callerUserId, durationSec, billedMinutes, listenerRatePerMin, listenerEarnedAmount]
+            );
+            callEarningsLogRecord = logRows[0] || null;
         }
 
         await client.query("COMMIT");
@@ -3276,7 +3303,15 @@ router.post('/end-call', auth, async (req, res) => {
                     source: transactionRecord.source,
                     minutes_change: transactionRecord.minutes,
                     created_at: transactionRecord.created_at
-                } : null
+                } : null,
+                listener_earnings: {
+                    rate_per_minute: listenerRatePerMin,
+                    earned_amount: listenerEarnedAmount,
+                    total_minutes: minutesUsed,
+                    unsettled_amount: updatedListenerData?.unsettled_amount ?? 0,
+                    settled_amount: updatedListenerData?.settled_amount ?? 0
+                },
+                call_earnings_log: callEarningsLogRecord
             }
         });
 
@@ -3290,6 +3325,9 @@ router.post('/end-call', auth, async (req, res) => {
     } finally {
         client.release();
     }
-});
+};
+
+router.post('/end-call', auth, endCallHandler);
 
 module.exports = router;
+module.exports.endCallHandler = endCallHandler;

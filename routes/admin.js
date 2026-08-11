@@ -13,7 +13,7 @@ const fs = require('fs');
 function cleanupUploadedFiles(files) {
     if (!files) return;
     Object.values(files).flat().forEach(file => {
-        fs.unlink(file.path, () => {});
+        fs.unlink(file.path, () => { });
     });
 }
 
@@ -255,7 +255,12 @@ router.get('/get-listeners', auth, role('admin'), async (req, res) => {
                 ld.application_status,
                 ld.profile_photo_status,
                 ld.primary_voice_status,
-                ld.secondary_voice_status
+                ld.secondary_voice_status,
+                COALESCE(ld.unsettled_amount, 0.00) AS unsettled_amount,
+                COALESCE(ld.settled_amount, 0.00) AS settled_amount,
+                COALESCE(ld.total_calls, 0) AS total_calls,
+                ld.call_price,
+                ld.rating
 
             FROM users u
 
@@ -292,7 +297,7 @@ router.get('/get-listeners', auth, role('admin'), async (req, res) => {
                 limit,
                 total_pages: Math.ceil(total / limit)
             }
-        },200);
+        }, 200);
     } catch (error) {
         console.error('Fetch listeners error:', error);
         res.status(200).json({ status: false, message: error.message });
@@ -308,14 +313,14 @@ router.post('/profile-photo-status', auth, role('admin'), async (req, res) => {
             return res.status(200).json({
                 status: false,
                 message: 'User ID and status are required.'
-            },200);
+            }, 200);
         }
 
-        if (![0,1,2].includes(Number(status))) {
+        if (![0, 1, 2].includes(Number(status))) {
             return res.status(200).json({
                 status: false,
                 message: 'Invalid status.'
-            },200);
+            }, 200);
         }
 
         const result = await pool.query(
@@ -325,11 +330,11 @@ router.post('/profile-photo-status', auth, role('admin'), async (req, res) => {
             [status, user_id]
         );
 
-        if(result.rowCount === 0){
+        if (result.rowCount === 0) {
             return res.status(200).json({
-                status:false,
-                message:"Listener not found."
-            },200);
+                status: false,
+                message: "Listener not found."
+            }, 200);
         }
 
         // Auto-approve: if all 3 are approved (1), set application_status = 2
@@ -351,14 +356,14 @@ router.post('/profile-photo-status', auth, role('admin'), async (req, res) => {
         else if (Number(status) === 2) message = 'Profile photo rejected successfully.';
         else message = 'Profile photo marked as pending.';
 
-        res.status(200).json({ status: true, message },200);
-        
+        res.status(200).json({ status: true, message }, 200);
+
     } catch (error) {
 
         res.status(200).json({
-            status:false,
-            message:error.message
-        },200);
+            status: false,
+            message: error.message
+        }, 200);
 
     }
 });
@@ -370,30 +375,30 @@ router.post('/primary-voice-status', auth, role('admin'), async (req, res) => {
 
         if (!user_id || status === undefined) {
             return res.status(200).json({
-                status:false,
-                message:"User ID and status are required."
-            },200);
+                status: false,
+                message: "User ID and status are required."
+            }, 200);
         }
 
-        if (![0,1,2].includes(Number(status))) {
+        if (![0, 1, 2].includes(Number(status))) {
             return res.status(200).json({
-                status:false,
-                message:"Invalid status."
-            },200);
+                status: false,
+                message: "Invalid status."
+            }, 200);
         }
 
         const result = await pool.query(
             `UPDATE listener_details
              SET primary_voice_status = $1
              WHERE user_id = $2`,
-            [status,user_id]
+            [status, user_id]
         );
 
-        if(result.rowCount === 0){
+        if (result.rowCount === 0) {
             return res.status(200).json({
-                status:false,
-                message:"Listener not found."
-            },200);
+                status: false,
+                message: "Listener not found."
+            }, 200);
         }
 
         // Auto-approve: if all 3 are approved (1), set application_status = 2
@@ -415,14 +420,14 @@ router.post('/primary-voice-status', auth, role('admin'), async (req, res) => {
         else if (Number(status) === 2) message = 'Primary voice rejected successfully.';
         else message = 'Primary voice marked as pending.';
 
-        res.status(200).json({ status: true, message },200);
+        res.status(200).json({ status: true, message }, 200);
 
-    } catch(error){
+    } catch (error) {
 
         res.status(200).json({
-            status:false,
-            message:error.message
-        }   ,200);
+            status: false,
+            message: error.message
+        }, 200);
 
     }
 });
@@ -434,30 +439,30 @@ router.post('/secondary-voice-status', auth, role('admin'), async (req, res) => 
 
         if (!user_id || status === undefined) {
             return res.status(200).json({
-                status:false,
-                message:"User ID and status are required."
-            }   ,200);
+                status: false,
+                message: "User ID and status are required."
+            }, 200);
         }
 
-        if (![0,1,2].includes(Number(status))) {
+        if (![0, 1, 2].includes(Number(status))) {
             return res.status(200).json({
-                status:false,
-                message:"Invalid status."
-            },200   );
+                status: false,
+                message: "Invalid status."
+            }, 200);
         }
 
         const result = await pool.query(
             `UPDATE listener_details
              SET secondary_voice_status = $1
              WHERE user_id = $2`,
-            [status,user_id]
+            [status, user_id]
         );
 
-        if(result.rowCount === 0){
+        if (result.rowCount === 0) {
             return res.status(200).json({
-                status:false,
-                message:"Listener not found."
-            },200);
+                status: false,
+                message: "Listener not found."
+            }, 200);
         }
 
         // Auto-approve: if all 3 are approved (1), set application_status = 2
@@ -479,14 +484,14 @@ router.post('/secondary-voice-status', auth, role('admin'), async (req, res) => 
         else if (Number(status) === 2) message = 'Secondary voice rejected successfully.';
         else message = 'Secondary voice marked as pending.';
 
-        res.status(200).json({ status: true, message },200);
+        res.status(200).json({ status: true, message }, 200);
 
-    } catch(error){
+    } catch (error) {
 
         res.status(200).json({
-            status:false,
-            message:error.message
-        },200);
+            status: false,
+            message: error.message
+        }, 200);
 
     }
 });
@@ -496,7 +501,7 @@ router.post('/add-listener', auth, role('admin'), upload.fields([
     { name: 'profile_photo', maxCount: 1 },
     { name: 'primary_voice', maxCount: 1 },
     { name: 'secondary_voice', maxCount: 1 }
-    ]), async (req, res) => {
+]), async (req, res) => {
     try {
 
         let {
@@ -989,7 +994,7 @@ router.get('/get-languages', auth, role('admin'), async (req, res) => {
             status: true,
             message: 'Languages fetched successfully.',
             data: languages
-        },200);
+        }, 200);
 
     } catch (error) {
         console.error(error);
@@ -997,7 +1002,7 @@ router.get('/get-languages', auth, role('admin'), async (req, res) => {
         res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
     }
 });
 // GET /api/admin/get-fluencies
@@ -1025,7 +1030,7 @@ router.get('/get-vibes', auth, role('admin'), async (req, res) => {
             status: true,
             message: 'Vibes fetched successfully.',
             data: vibes
-        },200);
+        }, 200);
 
     } catch (error) {
         console.error(error);
@@ -1033,7 +1038,7 @@ router.get('/get-vibes', auth, role('admin'), async (req, res) => {
         return res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
     }
 });
 // GET /api/admin/get-interests
@@ -1052,7 +1057,7 @@ router.get('/get-interests', auth, role('admin'), async (req, res) => {
             status: true,
             message: 'Interests fetched successfully.',
             data: interests
-        },200);
+        }, 200);
 
     } catch (error) {
         console.error(error);
@@ -1060,7 +1065,7 @@ router.get('/get-interests', auth, role('admin'), async (req, res) => {
         return res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
     }
 });
 
@@ -1151,7 +1156,7 @@ router.post('/add-vibe', auth, role('admin'), async (req, res) => {
             });
         }
 
-        
+
         // ── Character validation ──────────────────────────────────────────
         if (!/^[a-zA-Z\s'&-]+$/.test(vibe_name)) {
             return res.status(200).json({
@@ -1519,7 +1524,7 @@ router.post('/edit-interest', auth, role('admin'), async (req, res) => {
 router.post('/delete-language', auth, role('admin'), async (req, res) => {
     try {
 
-         const { id } = req.body;
+        const { id } = req.body;
 
         if (id === undefined || id === null || id === '') {
             return res.status(200).json({ status: false, message: 'Please provide the language ID to delete.' });
@@ -1572,7 +1577,7 @@ router.post('/delete-vibe', auth, role('admin'), async (req, res) => {
             return res.status(200).json({
                 status: false,
                 message: 'Please provide the vibe ID to delete.'
-            },200);
+            }, 200);
         }
         if (isNaN(Number(id)) || !Number.isInteger(Number(id)) || Number(id) <= 0) {
             return res.status(200).json({ status: false, message: 'Invalid vibe ID provided.' });
@@ -1587,7 +1592,7 @@ router.post('/delete-vibe', auth, role('admin'), async (req, res) => {
             status: true,
             message: 'Vibe deleted successfully.',
             id: result[0].id
-        },200);
+        }, 200);
 
     } catch (error) {
         console.error(error);
@@ -1595,7 +1600,7 @@ router.post('/delete-vibe', auth, role('admin'), async (req, res) => {
         return res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
     }
 });
 //post /api/admin/delete-interest
@@ -1608,7 +1613,7 @@ router.post('/delete-interest', auth, role('admin'), async (req, res) => {
             return res.status(200).json({
                 status: false,
                 message: 'Please provide the interest ID to delete.'
-            },200);
+            }, 200);
         }
         if (isNaN(Number(id)) || !Number.isInteger(Number(id)) || Number(id) <= 0) {
             return res.status(200).json({ status: false, message: 'Invalid interest ID provided.' });
@@ -1623,7 +1628,7 @@ router.post('/delete-interest', auth, role('admin'), async (req, res) => {
             status: true,
             message: 'Interest deleted successfully.',
             id: result[0].id
-        },200);
+        }, 200);
 
     } catch (error) {
         console.error(error);
@@ -1631,7 +1636,7 @@ router.post('/delete-interest', auth, role('admin'), async (req, res) => {
         return res.status(200).json({
             status: false,
             message: error.message
-        },200);
+        }, 200);
     }
 });
 
@@ -3225,7 +3230,7 @@ async function attachLanguages(listeners) {
 
 // Helper: parse & validate pagination params
 function getPagination(query) {
-    const page  = Math.max(1, parseInt(query.page)  || 1);
+    const page = Math.max(1, parseInt(query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 10));
     const offset = (page - 1) * limit;
     return { page, limit, offset };
@@ -3402,7 +3407,12 @@ router.get('/get-listener/:user_id', auth, role('admin'), async (req, res) => {
                 ld.profile_type, ld.primary_voice, ld.secondary_voice,
                 ld.ready_to_start, ld.premium_boost, ld.code_of_conduct_agreed,
                 ld.application_status, ld.profile_photo_status,
-                ld.primary_voice_status, ld.secondary_voice_status
+                ld.primary_voice_status, ld.secondary_voice_status,
+                COALESCE(ld.unsettled_amount, 0.00) AS unsettled_amount,
+                COALESCE(ld.settled_amount, 0.00) AS settled_amount,
+                COALESCE(ld.total_calls, 0) AS total_calls,
+                ld.call_price,
+                ld.rating
             FROM users u
             JOIN listener_details ld ON u.id = ld.user_id
             WHERE u.id = $1 AND u.user_type = 'listener'
@@ -3450,15 +3460,15 @@ router.post(
     '/edit-listener',
     auth, role('admin'),
     upload.fields([
-        { name: 'profile_photo',  maxCount: 1 },
-        { name: 'primary_voice',  maxCount: 1 },
+        { name: 'profile_photo', maxCount: 1 },
+        { name: 'primary_voice', maxCount: 1 },
         { name: 'secondary_voice', maxCount: 1 }
     ]),
     async (req, res) => {
         try {
             const { user_id, full_name, current_location, home_country,
-                    university_email, interests, profile_type,
-                    ready_to_start, premium_boost } = req.body;
+                university_email, interests, profile_type,
+                ready_to_start, premium_boost } = req.body;
 
             if (!user_id)
                 return res.status(200).json({ status: false, message: 'user_id is required.' });
@@ -3475,7 +3485,7 @@ router.post(
 
             // ── Update users table ──────────────────────────────────────────
             const userUpdates = [];
-            const userParams  = [];
+            const userParams = [];
             if (full_name) { userUpdates.push('name = ?'); userParams.push(full_name); }
             if (req.files?.profile_photo) {
                 userUpdates.push('profile_photo = ?');
@@ -3491,14 +3501,14 @@ router.post(
 
             // ── Update listener_details table ──────────────────────────────
             const ldUpdates = [];
-            const ldParams  = [];
-            if (current_location) { ldUpdates.push('current_location = ?');  ldParams.push(current_location); }
-            if (home_country)     { ldUpdates.push('home_country = ?');       ldParams.push(home_country); }
-            if (university_email) { ldUpdates.push('university_email = ?');   ldParams.push(university_email); }
-            if (interests)        { ldUpdates.push('interests = ?');          ldParams.push(interests); }
-            if (profile_type)     { ldUpdates.push('profile_type = ?');       ldParams.push(profile_type); }
+            const ldParams = [];
+            if (current_location) { ldUpdates.push('current_location = ?'); ldParams.push(current_location); }
+            if (home_country) { ldUpdates.push('home_country = ?'); ldParams.push(home_country); }
+            if (university_email) { ldUpdates.push('university_email = ?'); ldParams.push(university_email); }
+            if (interests) { ldUpdates.push('interests = ?'); ldParams.push(interests); }
+            if (profile_type) { ldUpdates.push('profile_type = ?'); ldParams.push(profile_type); }
             if (ready_to_start !== undefined) { ldUpdates.push('ready_to_start = ?'); ldParams.push(ready_to_start); }
-            if (premium_boost  !== undefined) { ldUpdates.push('premium_boost = ?');  ldParams.push(Number(premium_boost)); }
+            if (premium_boost !== undefined) { ldUpdates.push('premium_boost = ?'); ldParams.push(Number(premium_boost)); }
             if (req.files?.primary_voice) {
                 ldUpdates.push('primary_voice = ?', 'primary_voice_status = 1');
                 ldParams.push(req.files.primary_voice[0].filename);
@@ -3519,7 +3529,7 @@ router.post(
             // ── Update languages (if provided) ─────────────────────────────
             if (req.body.languages) {
                 let languages = [];
-                try { languages = JSON.parse(req.body.languages); } catch (_) {}
+                try { languages = JSON.parse(req.body.languages); } catch (_) { }
                 if (Array.isArray(languages) && languages.length > 0) {
                     await pool.query('DELETE FROM listener_preferred_languages WHERE user_id = $1', [user_id]);
                     for (const lang of languages) {
@@ -3657,7 +3667,7 @@ router.get('/filter-options', auth, role('admin'), async (req, res) => {
         res.status(200).json({
             status: true,
             data: {
-                countries:    countries.map(r => r.value),
+                countries: countries.map(r => r.value),
                 profile_types: profileTypes.map(r => r.value),
                 languages
             }
@@ -3878,5 +3888,545 @@ router.post('/add-fluency', auth, role('admin'), async (req, res) => {
     }
 });
 
+// =========================================================================
+// LISTENER RATE, SETTLEMENT & CALL EARNINGS LOG ENDPOINTS
+// =========================================================================
+
+// GET /api/admin/get-listener-rate
+// Get current configured listener minute rate
+router.get('/get-listener-rate', auth, role('admin'), async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, setting_key, setting_value, created_at, updated_at
+             FROM app_settings
+             WHERE setting_key = 'listener_rate_per_minute'
+             LIMIT 1`
+        );
+
+        const rate = rows.length > 0 && !isNaN(Number(rows[0].setting_value))
+            ? Number(rows[0].setting_value)
+            : 0.20;
+
+        res.status(200).json({
+            status: true,
+            message: 'Listener rate per minute fetched successfully.',
+            data: {
+                setting_key: 'listener_rate_per_minute',
+                rate_per_minute: rate.toFixed(2),
+                rate_numeric: rate,
+                setting_record: rows[0] || null
+            }
+        });
+    } catch (error) {
+        console.error('Get listener rate error:', error);
+        res.status(200).json({ status: false, message: error.message });
+    }
+});
+
+// POST /api/admin/set-listener-rate
+// Update or set listener rate per minute
+// Body: { rate } or { listener_rate_per_minute } or { setting_value }
+router.post('/set-listener-rate', auth, role('admin'), async (req, res) => {
+    try {
+        const rawRate = req.body.rate ?? req.body.listener_rate_per_minute ?? req.body.setting_value;
+
+        if (rawRate === undefined || rawRate === null || rawRate === '') {
+            return res.status(200).json({
+                status: false,
+                message: 'Rate value is required (rate / listener_rate_per_minute / setting_value).'
+            });
+        }
+
+        const numericRate = Number(rawRate);
+        if (isNaN(numericRate) || numericRate < 0) {
+            return res.status(200).json({
+                status: false,
+                message: 'Rate must be a non-negative number.'
+            });
+        }
+
+        const formattedRate = numericRate.toFixed(2);
+
+        // Check if setting already exists
+        const { rows: existing } = await pool.query(
+            `SELECT id FROM app_settings WHERE setting_key = 'listener_rate_per_minute' LIMIT 1`
+        );
+
+        let settingRecord = null;
+        if (existing.length > 0) {
+            const { rows: updated } = await pool.query(
+                `UPDATE app_settings
+                 SET setting_value = $1,
+                     updated_at = NOW()
+                 WHERE setting_key = 'listener_rate_per_minute'
+                 RETURNING id, setting_key, setting_value, created_at, updated_at`,
+                [formattedRate]
+            );
+            settingRecord = updated[0];
+        } else {
+            const { rows: inserted } = await pool.query(
+                `INSERT INTO app_settings (setting_key, setting_value, created_at, updated_at)
+                 VALUES ('listener_rate_per_minute', $1, NOW(), NOW())
+                 RETURNING id, setting_key, setting_value, created_at, updated_at`,
+                [formattedRate]
+            );
+            settingRecord = inserted[0];
+        }
+
+        res.status(200).json({
+            status: true,
+            message: 'Listener rate per minute updated successfully.',
+            data: {
+                setting_key: 'listener_rate_per_minute',
+                rate_per_minute: formattedRate,
+                rate_numeric: numericRate,
+                setting_record: settingRecord
+            }
+        });
+    } catch (error) {
+        console.error('Set listener rate error:', error);
+        res.status(200).json({ status: false, message: error.message });
+    }
+});
+
+// POST /api/admin/settle-listener
+// Settle listener's unsettled amount (partial or full)
+// Body: { listener_id, amount (optional - defaults to all unsettled), note, payment_method, transaction_ref }
+router.post('/settle-listener', auth, role('admin'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const admin_id = req.user.id;
+        const { listener_id, amount, note, payment_method, transaction_ref } = req.body;
+
+        if (!listener_id) {
+            return res.status(200).json({
+                status: false,
+                message: 'listener_id is required.'
+            });
+        }
+
+        const parsedListenerId = Number(listener_id);
+        if (isNaN(parsedListenerId) || !Number.isInteger(parsedListenerId) || parsedListenerId <= 0) {
+            return res.status(200).json({
+                status: false,
+                message: 'listener_id must be a valid positive integer.'
+            });
+        }
+
+        await client.query('BEGIN');
+
+        // Check listener details with row lock
+        const { rows: listenerRows } = await client.query(
+            `SELECT u.id, u.name, u.email, ld.unsettled_amount, ld.settled_amount
+             FROM users u
+             JOIN listener_details ld ON ld.user_id = u.id
+             WHERE u.id = $1
+             FOR UPDATE OF ld`,
+            [parsedListenerId]
+        );
+
+        if (listenerRows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(200).json({
+                status: false,
+                message: 'Listener not found.'
+            });
+        }
+
+        const listener = listenerRows[0];
+        const currentUnsettled = Number(listener.unsettled_amount || 0);
+        const currentSettled = Number(listener.settled_amount || 0);
+
+        if (currentUnsettled <= 0) {
+            await client.query('ROLLBACK');
+            return res.status(200).json({
+                status: false,
+                message: 'Listener has no unsettled amount to settle (current unsettled amount: $0.00).'
+            });
+        }
+
+        // Determine settle amount
+        let settleAmount = currentUnsettled;
+        if (amount !== undefined && amount !== null && amount !== '') {
+            const parsedAmount = Number(amount);
+            if (isNaN(parsedAmount) || parsedAmount <= 0) {
+                await client.query('ROLLBACK');
+                return res.status(200).json({
+                    status: false,
+                    message: 'Settlement amount must be a positive number.'
+                });
+            }
+            if (parsedAmount > currentUnsettled) {
+                await client.query('ROLLBACK');
+                return res.status(200).json({
+                    status: false,
+                    message: `Settlement amount ($${parsedAmount.toFixed(2)}) cannot exceed current unsettled amount ($${currentUnsettled.toFixed(2)}).`
+                });
+            }
+            settleAmount = parsedAmount;
+        }
+
+        settleAmount = parseFloat(settleAmount.toFixed(2));
+        const newUnsettled = Math.max(0, parseFloat((currentUnsettled - settleAmount).toFixed(2)));
+        const newSettled = parseFloat((currentSettled + settleAmount).toFixed(2));
+
+        // 1. Update listener_details
+        const { rows: updatedListenerRows } = await client.query(
+            `UPDATE listener_details
+             SET unsettled_amount = $1,
+                 settled_amount = $2,
+                 updated_at = NOW()
+             WHERE user_id = $3
+             RETURNING user_id, unsettled_amount, settled_amount`,
+            [newUnsettled, newSettled, parsedListenerId]
+        );
+
+        // 2. Insert into listener_settlements
+        const { rows: settlementRows } = await client.query(
+            `INSERT INTO listener_settlements (listener_id, admin_id, amount, note, payment_method, transaction_ref, status, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, 'completed', NOW())
+             RETURNING id, listener_id, admin_id, amount, note, payment_method, transaction_ref, status, created_at`,
+            [
+                parsedListenerId,
+                admin_id,
+                settleAmount,
+                note ? String(note).trim() : 'Settlement processed by admin',
+                payment_method ? String(payment_method).trim() : 'manual',
+                transaction_ref ? String(transaction_ref).trim() : null
+            ]
+        );
+
+        await client.query('COMMIT');
+
+        res.status(200).json({
+            status: true,
+            message: `Successfully settled $${settleAmount.toFixed(2)} for ${listener.name}.`,
+            data: {
+                settlement: settlementRows[0],
+                listener: {
+                    id: listener.id,
+                    name: listener.name,
+                    email: listener.email,
+                    previous_unsettled_amount: currentUnsettled.toFixed(2),
+                    settled_this_transaction: settleAmount.toFixed(2),
+                    remaining_unsettled_amount: newUnsettled.toFixed(2),
+                    total_settled_amount: newSettled.toFixed(2)
+                }
+            }
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Settle listener error:', error);
+        res.status(200).json({ status: false, message: error.message });
+    } finally {
+        client.release();
+    }
+});
+
+// GET /api/admin/settlements
+// List all settlements with filters and pagination
+router.get('/settlements', auth, role('admin'), async (req, res) => {
+    try {
+        const { listener_id, search, status, from_date, to_date } = req.query;
+        const page = Math.max(1, parseInt(req.query.page || 1));
+        const limit = Math.max(1, parseInt(req.query.limit || 20));
+        const offset = (page - 1) * limit;
+
+        const conditions = ['1=1'];
+        const params = [];
+
+        if (listener_id) {
+            conditions.push(`ls.listener_id = $${params.length + 1}`);
+            params.push(Number(listener_id));
+        }
+
+        if (status && status.trim()) {
+            conditions.push(`ls.status = $${params.length + 1}`);
+            params.push(status.trim());
+        }
+
+        if (search && search.trim()) {
+            conditions.push(`(u.name ILIKE $${params.length + 1} OR u.email ILIKE $${params.length + 2} OR ls.transaction_ref ILIKE $${params.length + 3} OR ls.note ILIKE $${params.length + 4})`);
+            params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
+        }
+
+        if (from_date && from_date.trim()) {
+            conditions.push(`ls.created_at >= $${params.length + 1}`);
+            params.push(from_date.trim());
+        }
+
+        if (to_date && to_date.trim()) {
+            conditions.push(`ls.created_at <= $${params.length + 1}`);
+            params.push(to_date.trim());
+        }
+
+        const WHERE = `WHERE ` + conditions.join(' AND ');
+
+        // Count total
+        const { rows: countRows } = await pool.query(
+            `SELECT COUNT(*) AS total
+             FROM listener_settlements ls
+             LEFT JOIN users u ON u.id = ls.listener_id
+             ${WHERE}`,
+            params
+        );
+        const total = parseInt(countRows[0]?.total || 0);
+
+        // Sum total settled amount for current filter
+        const { rows: sumRows } = await pool.query(
+            `SELECT SUM(ls.amount) AS total_settled_sum
+             FROM listener_settlements ls
+             LEFT JOIN users u ON u.id = ls.listener_id
+             ${WHERE}`,
+            params
+        );
+        const totalSettledSum = Number(sumRows[0]?.total_settled_sum || 0).toFixed(2);
+
+        // Fetch records
+        const { rows: settlements } = await pool.query(
+            `SELECT ls.id, ls.listener_id, ls.admin_id, ls.amount, ls.note, ls.payment_method, ls.transaction_ref, ls.status, ls.created_at,
+                    u.name AS listener_name, u.email AS listener_email, u.phone AS listener_phone, u.profile_photo AS listener_profile_photo,
+                    adm.name AS admin_name, adm.email AS admin_email
+             FROM listener_settlements ls
+             LEFT JOIN users u ON u.id = ls.listener_id
+             LEFT JOIN users adm ON adm.id = ls.admin_id
+             ${WHERE}
+             ORDER BY ls.created_at DESC
+             LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+            [...params, limit, offset]
+        );
+
+        const BASE_URL = `${req.protocol}://${req.get('host')}`;
+        settlements.forEach(s => {
+            if (s.listener_profile_photo) {
+                s.listener_profile_photo = `${BASE_URL}/uploads/${s.listener_profile_photo}`;
+            }
+        });
+
+        res.status(200).json({
+            status: true,
+            message: 'Settlements fetched successfully.',
+            data: {
+                total,
+                page,
+                limit,
+                total_settled_sum: totalSettledSum,
+                settlements
+            }
+        });
+    } catch (error) {
+        console.error('Fetch settlements error:', error);
+        res.status(200).json({ status: false, message: error.message });
+    }
+});
+
+// GET /api/admin/call-earnings-logs
+// List all call ended earnings logs with filters and pagination
+router.get('/call-earnings-logs', auth, role('admin'), async (req, res) => {
+    try {
+        const { listener_id, user_id, call_id, search, from_date, to_date } = req.query;
+        const page = Math.max(1, parseInt(req.query.page || 1));
+        const limit = Math.max(1, parseInt(req.query.limit || 20));
+        const offset = (page - 1) * limit;
+
+        const conditions = ['1=1'];
+        const params = [];
+
+        if (listener_id) {
+            conditions.push(`cel.listener_id = $${params.length + 1}`);
+            params.push(Number(listener_id));
+        }
+
+        if (user_id) {
+            conditions.push(`cel.user_id = $${params.length + 1}`);
+            params.push(Number(user_id));
+        }
+
+        if (call_id) {
+            conditions.push(`cel.call_id = $${params.length + 1}`);
+            params.push(Number(call_id));
+        }
+
+        if (search && search.trim()) {
+            conditions.push(`(lu.name ILIKE $${params.length + 1} OR lu.email ILIKE $${params.length + 2} OR cu.name ILIKE $${params.length + 3} OR cu.email ILIKE $${params.length + 4})`);
+            params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
+        }
+
+        if (from_date && from_date.trim()) {
+            conditions.push(`cel.created_at >= $${params.length + 1}`);
+            params.push(from_date.trim());
+        }
+
+        if (to_date && to_date.trim()) {
+            conditions.push(`cel.created_at <= $${params.length + 1}`);
+            params.push(to_date.trim());
+        }
+
+        const WHERE = `WHERE ` + conditions.join(' AND ');
+
+        // Count total
+        const { rows: countRows } = await pool.query(
+            `SELECT COUNT(*) AS total
+             FROM call_earnings_logs cel
+             LEFT JOIN users lu ON lu.id = cel.listener_id
+             LEFT JOIN users cu ON cu.id = cel.user_id
+             ${WHERE}`,
+            params
+        );
+        const total = parseInt(countRows[0]?.total || 0);
+
+        // Sum totals
+        const { rows: sumRows } = await pool.query(
+            `SELECT SUM(cel.amount) AS total_amount_sum, SUM(cel.total_minutes) AS total_minutes_sum
+             FROM call_earnings_logs cel
+             LEFT JOIN users lu ON lu.id = cel.listener_id
+             LEFT JOIN users cu ON cu.id = cel.user_id
+             ${WHERE}`,
+            params
+        );
+        const totalAmountSum = Number(sumRows[0]?.total_amount_sum || 0).toFixed(2);
+        const totalMinutesSum = parseInt(sumRows[0]?.total_minutes_sum || 0);
+
+        // Fetch logs
+        const { rows: logs } = await pool.query(
+            `SELECT cel.id, cel.call_id, cel.listener_id, cel.user_id, cel.duration_seconds, cel.total_minutes, cel.rate_per_minute, cel.amount, cel.created_at,
+                    lu.name AS listener_name, lu.email AS listener_email, lu.profile_photo AS listener_profile_photo,
+                    cu.name AS caller_name, cu.email AS caller_email, cu.profile_photo AS caller_profile_photo
+             FROM call_earnings_logs cel
+             LEFT JOIN users lu ON lu.id = cel.listener_id
+             LEFT JOIN users cu ON cu.id = cel.user_id
+             ${WHERE}
+             ORDER BY cel.created_at DESC
+             LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+            [...params, limit, offset]
+        );
+
+        const BASE_URL = `${req.protocol}://${req.get('host')}`;
+        logs.forEach(l => {
+            if (l.listener_profile_photo) {
+                l.listener_profile_photo = `${BASE_URL}/uploads/${l.listener_profile_photo}`;
+            }
+            if (l.caller_profile_photo) {
+                l.caller_profile_photo = `${BASE_URL}/uploads/${l.caller_profile_photo}`;
+            }
+        });
+
+        res.status(200).json({
+            status: true,
+            message: 'Call earnings logs fetched successfully.',
+            data: {
+                total,
+                page,
+                limit,
+                total_amount_sum: totalAmountSum,
+                total_minutes_sum: totalMinutesSum,
+                logs
+            }
+        });
+    } catch (error) {
+        console.error('Fetch call earnings logs error:', error);
+        res.status(200).json({ status: false, message: error.message });
+    }
+});
+
+// GET /api/admin/listeners-settlement-summary
+// Summary overview of all listeners with unsettled, settled balances, and call totals
+router.get('/listeners-settlement-summary', auth, role('admin'), async (req, res) => {
+    try {
+        const { search, sort_by } = req.query;
+        const page = Math.max(1, parseInt(req.query.page || 1));
+        const limit = Math.max(1, parseInt(req.query.limit || 20));
+        const offset = (page - 1) * limit;
+
+        const conditions = ["u.user_type = 'listener'"];
+        const params = [];
+
+        if (search && search.trim()) {
+            conditions.push(`(u.name ILIKE $${params.length + 1} OR u.email ILIKE $${params.length + 2} OR u.phone ILIKE $${params.length + 3})`);
+            params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
+        }
+
+        const WHERE = `WHERE ` + conditions.join(' AND ');
+
+        let orderBy = 'COALESCE(ld.unsettled_amount, 0) DESC';
+        if (sort_by === 'settled') {
+            orderBy = 'COALESCE(ld.settled_amount, 0) DESC';
+        } else if (sort_by === 'calls') {
+            orderBy = 'COALESCE(ld.total_calls, 0) DESC';
+        } else if (sort_by === 'name') {
+            orderBy = 'u.name ASC';
+        }
+
+        const { rows: countRows } = await pool.query(
+            `SELECT COUNT(*) AS total
+             FROM users u
+             JOIN listener_details ld ON ld.user_id = u.id
+             ${WHERE}`,
+            params
+        );
+        const total = parseInt(countRows[0]?.total || 0);
+
+        // Aggregate overall totals
+        const { rows: aggRows } = await pool.query(
+            `SELECT 
+                SUM(COALESCE(ld.unsettled_amount, 0)) AS total_unsettled_all,
+                SUM(COALESCE(ld.settled_amount, 0)) AS total_settled_all,
+                SUM(COALESCE(ld.total_calls, 0)) AS total_calls_all
+             FROM users u
+             JOIN listener_details ld ON ld.user_id = u.id
+             ${WHERE}`,
+            params
+        );
+
+        const { rows: listeners } = await pool.query(
+            `SELECT 
+                u.id, u.name, u.email, u.phone, u.profile_photo,
+                COALESCE(ld.unsettled_amount, 0.00) AS unsettled_amount,
+                COALESCE(ld.settled_amount, 0.00) AS settled_amount,
+                (COALESCE(ld.unsettled_amount, 0.00) + COALESCE(ld.settled_amount, 0.00)) AS total_earnings,
+                COALESCE(ld.total_calls, 0) AS total_calls,
+                ld.call_price,
+                ld.rating,
+                ld.application_status,
+                (
+                    SELECT MAX(created_at) 
+                    FROM listener_settlements 
+                    WHERE listener_id = u.id
+                ) AS last_settled_at
+             FROM users u
+             JOIN listener_details ld ON ld.user_id = u.id
+             ${WHERE}
+             ORDER BY ${orderBy}
+             LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+            [...params, limit, offset]
+        );
+
+        const BASE_URL = `${req.protocol}://${req.get('host')}`;
+        listeners.forEach(l => {
+            if (l.profile_photo) {
+                l.profile_photo = `${BASE_URL}/uploads/${l.profile_photo}`;
+            }
+        });
+
+        res.status(200).json({
+            status: true,
+            message: 'Listener settlement summary fetched successfully.',
+            data: {
+                total,
+                page,
+                limit,
+                overall_unsettled_total: Number(aggRows[0]?.total_unsettled_all || 0).toFixed(2),
+                overall_settled_total: Number(aggRows[0]?.total_settled_all || 0).toFixed(2),
+                overall_calls_total: parseInt(aggRows[0]?.total_calls_all || 0),
+                listeners
+            }
+        });
+    } catch (error) {
+        console.error('Fetch settlement summary error:', error);
+        res.status(200).json({ status: false, message: error.message });
+    }
+});
 
 module.exports = router;
+

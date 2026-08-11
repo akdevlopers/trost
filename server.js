@@ -6,6 +6,11 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 5432;
+const initDb = require('./config/initDb');
+
+// Initialize database tables and columns
+initDb();
+
 
 // Middleware
 app.use(cors());
