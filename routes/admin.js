@@ -3576,6 +3576,42 @@ router.post('/update-application-status', auth, role('admin'), async (req, res) 
     }
 });
 
+// POST /api/admin/approve-listener
+// Approve a listener's media files (profile photo, primary voice, secondary voice) and set application status to approved.
+// Body: { user_id }
+router.post('/approve-listener', auth, role('admin'), async (req, res) => {
+    try {
+        const { user_id } = req.body;
+
+        if (!user_id) {
+            return res.status(200).json({ status: false, message: 'user_id is required.' });
+        }
+
+        // We update profile_photo_status, primary_voice_status, secondary_voice_status to 1 (approved)
+        // and application_status to 2 (approved)
+        const result = await pool.query(
+            `UPDATE listener_details
+             SET profile_photo_status = 1,
+                 primary_voice_status = 1,
+                 secondary_voice_status = 1,
+                 application_status = 2
+             WHERE user_id = $1`,
+            [user_id]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(200).json({ status: false, message: 'Listener not found.' });
+        }
+
+        res.status(200).json({
+            status: true,
+            message: 'Listener approved completely (profile photo, primary voice, secondary voice, and application status).'
+        });
+    } catch (error) {
+        res.status(200).json({ status: false, message: error.message });
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN ACCOUNT APIS
 // ─────────────────────────────────────────────────────────────────────────────
