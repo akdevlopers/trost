@@ -124,6 +124,19 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
                 message: "You must agree to the Code of Conduct before submitting your application."
             }, 200);
         }
+        // Check if university email is verified in users table
+        const { rows: verificationCheck } = await pool.query(
+            "SELECT email_verified FROM users WHERE email = $1",
+            [university_email]
+        );
+
+        if (verificationCheck.length === 0 || !verificationCheck[0].email_verified) {
+            return res.status(200).json({
+                status: false,
+                message: "Please verify your email before submitting the application."
+            }, 200);
+        }
+
         // Hash the password
         const hashedPassword = await bcrypt.hash(password, 12);
 
@@ -2345,6 +2358,143 @@ const listenerCallEarningsLogsHandler = async (req, res) => {
 
 router.get('/listener/call-earnings-logs', auth, listenerCallEarningsLogsHandler);
 router.post('/listener/call-earnings-logs', auth, listenerCallEarningsLogsHandler);
+
+// POST /api/listener/send-email-otp
+// Generate and send an OTP code to a listener's email address
+router.post('/listener/send-email-otp', async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(200).json({ status: false, message: "Email is required." });
+        }
+
+        const cleanEmail = email.trim().toLowerCase();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(cleanEmail)) {
+            return res.status(200).json({ status: false, message: "Please enter a valid email address." });
+        }
+
+        // Check existing user
+        const { rows: users } = await pool.query(
+            "SELECT * FROM users WHERE email = $1 LIMIT 1",
+            [cleanEmail]
+        );
+
+        // Account with password already exists
+        if (users.length > 0 && users[0].password) {
+            return res.status(200).json({ status: false, message: "Email already registered." });
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000);
+
+        if (users.length > 0) {
+            await pool.query(
+                `UPDATE users
+                 SET email_otp = $1,
+                     otp_created_at = NOW(),
+                     email_verified = false,
+                     email_verified_at = NULL
+                 WHERE email = $2`,
+                [otp, cleanEmail]
+            );
+        } else {
+            await pool.query(
+                `INSERT INTO users (email, email_otp, otp_created_at, email_verified, user_type)
+                 VALUES ($1, $2, NOW(), false, 'listener')`,
+                [cleanEmail, otp]
+            );
+        }
+
+        // Send OTP via email in the background (non-blocking)
+        sendOtpEmail(cleanEmail, otp)
+            .then(emailResult => {
+                if (!emailResult.status) {
+                    console.error(`Failed to send OTP email to ${cleanEmail}:`, emailResult.error);
+                }
+            })
+            .catch(err => {
+                console.error(`Unhandled error sending OTP email to ${cleanEmail}:`, err);
+            });
+
+        return res.status(200).json({
+            status: true,
+            message: "OTP sent successfully.",
+            otp // Remove in production
+        });
+    } catch (error) {
+        console.error(error);
+        return res.status(200).json({ status: false, message: error.message });
+    }
+});
+
+// POST /api/listener/verify-email-otp
+// Verify the OTP code sent to the listener's email
+router.post('/listener/verify-email-otp', async (req, res) => {
+    try {
+        let { email, otp } = req.body;
+        email = email?.trim().toLowerCase();
+
+        if (!email || !otp) {
+            return res.status(200).json({ status: false, message: "Email and OTP are required." });
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(200).json({ status: false, message: "Please enter a valid email address." });
+        }
+
+        const otpRegex = /^[0-9]{6}$/;
+        if (!otpRegex.test(String(otp))) {
+            return res.status(200).json({ status: false, message: "OTP must be a 6-digit number." });
+        }
+
+        const { rows: users } = await pool.query(
+            "SELECT * FROM users WHERE email = $1 LIMIT 1",
+            [email]
+        );
+
+        if (users.length === 0) {
+            return res.status(200).json({ status: false, message: "Email not found." });
+        }
+
+        const user = users[0];
+
+        if (user.password) {
+            return res.status(200).json({ status: false, message: "Email already registered." });
+        }
+
+        if (String(user.email_otp) !== String(otp)) {
+            return res.status(200).json({ status: false, message: "Invalid OTP." });
+        }
+
+        // Check expiration
+        const { rows: otpValid } = await pool.query(
+            `SELECT 1 FROM users WHERE email = $1 AND otp_created_at >= NOW() - INTERVAL '5 minutes'`,
+            [email]
+        );
+
+        if (otpValid.length === 0) {
+            return res.status(200).json({ status: false, message: "OTP has expired. Please request a new OTP." });
+        }
+
+        // Mark verified
+        await pool.query(
+            `UPDATE users
+             SET email_verified = true,
+                 email_verified_at = NOW(),
+                 email_otp = NULL,
+                 otp_created_at = NULL
+             WHERE email = $1`,
+             [email]
+        );
+
+        return res.status(200).json({ status: true, message: "Email verified successfully." });
+    } catch (error) {
+        console.error(error);
+        return res.status(200).json({ status: false, message: error.message });
+    }
+});
 
 module.exports = router;
 
