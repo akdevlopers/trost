@@ -95,11 +95,16 @@ router.post('/send-email-otp', async (req, res) => {
 
         }
 
-        // Send OTP via email
-        const emailResult = await sendOtpEmail(cleanEmail, otp);
-        if (!emailResult.status) {
-            console.error(`Failed to send OTP email to ${cleanEmail}:`, emailResult.error);
-        }
+        // Send OTP via email in the background (non-blocking)
+        sendOtpEmail(cleanEmail, otp)
+            .then(emailResult => {
+                if (!emailResult.status) {
+                    console.error(`Failed to send OTP email to ${cleanEmail}:`, emailResult.error);
+                }
+            })
+            .catch(err => {
+                console.error(`Unhandled error sending OTP email to ${cleanEmail}:`, err);
+            });
 
         return res.status(200).json({
             status: true,

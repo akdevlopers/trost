@@ -767,11 +767,16 @@ router.post('/forgot-password', async (req, res) => {
         const otp = Math.floor(100000 + Math.random() * 900000);
         await pool.query('UPDATE users SET otp = $1 WHERE email = $2', [otp, email]);
 
-        // Send OTP to email
-        const emailResult = await sendOtpEmail(email, otp);
-        if (!emailResult.status) {
-            console.error(`Failed to send password reset OTP email to ${email}:`, emailResult.error);
-        }
+        // Send OTP to email in the background (non-blocking)
+        sendOtpEmail(email, otp)
+            .then(emailResult => {
+                if (!emailResult.status) {
+                    console.error(`Failed to send password reset OTP email to ${email}:`, emailResult.error);
+                }
+            })
+            .catch(err => {
+                console.error(`Unhandled error sending password reset OTP email to ${email}:`, err);
+            });
 
         res.status(200).json({ status: true, message: 'Password reset OTP sent to your email.', otp }); // remove otp in production
     } catch (error) {
