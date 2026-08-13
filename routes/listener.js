@@ -1938,7 +1938,10 @@ router.post('/listener/status', async (req, res) => {
         }
 
         const { rows } = await pool.query(
-            'SELECT available_now FROM listener_details WHERE user_id = $1 LIMIT 1',
+            `SELECT ld.available_now, u.name 
+             FROM listener_details ld
+             JOIN users u ON ld.user_id = u.id
+             WHERE ld.user_id = $1 LIMIT 1`,
             [listenerId]
         );
 
@@ -1953,6 +1956,7 @@ router.post('/listener/status', async (req, res) => {
             status: true,
             message: 'Status fetched successfully.',
             data: {
+                name: rows[0].name,
                 online: !!rows[0].available_now
             }
         });
