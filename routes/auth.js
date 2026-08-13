@@ -6,6 +6,7 @@ const pool = require('../config/db');
 const { auth, verifyOtpToken, verifyPhoneToken } = require('../middleware/auth');
 const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const { sendOtpEmail } = require('../utils/email');
 
 //these all user login 
 
@@ -94,7 +95,11 @@ router.post('/send-email-otp', async (req, res) => {
 
         }
 
-        // TODO: Send OTP via email
+        // Send OTP via email
+        const emailResult = await sendOtpEmail(cleanEmail, otp);
+        if (!emailResult.status) {
+            console.error(`Failed to send OTP email to ${cleanEmail}:`, emailResult.error);
+        }
 
         return res.status(200).json({
             status: true,

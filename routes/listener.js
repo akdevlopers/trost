@@ -7,6 +7,7 @@ const { auth, verifyOtpToken } = require('../middleware/auth');
 const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const upload = require('../middleware/upload');
+const { sendOtpEmail } = require('../utils/email');
 
 // POST /api/apply-listener 
 router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount: 1 }, { name: 'primary_voice', maxCount: 1 }, { name: 'secondary_voice', maxCount: 1 }]), async (req, res) => {
@@ -766,7 +767,12 @@ router.post('/forgot-password', async (req, res) => {
         const otp = Math.floor(100000 + Math.random() * 900000);
         await pool.query('UPDATE users SET otp = $1 WHERE email = $2', [otp, email]);
 
-        // TODO: Send OTP to email
+        // Send OTP to email
+        const emailResult = await sendOtpEmail(email, otp);
+        if (!emailResult.status) {
+            console.error(`Failed to send password reset OTP email to ${email}:`, emailResult.error);
+        }
+
         res.status(200).json({ status: true, message: 'Password reset OTP sent to your email.', otp }); // remove otp in production
     } catch (error) {
         res.status(200).json({ status: false, message: error.message });
