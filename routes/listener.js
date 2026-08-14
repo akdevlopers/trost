@@ -2069,7 +2069,7 @@ router.post('/listener/status', async (req, res) => {
         }
 
         const { rows } = await pool.query(
-            `SELECT ld.available_now, u.name 
+            `SELECT ld.available_now, ld.application_status, u.name 
              FROM listener_details ld
              JOIN users u ON ld.user_id = u.id
              WHERE ld.user_id = $1 LIMIT 1`,
@@ -2083,12 +2083,24 @@ router.post('/listener/status', async (req, res) => {
             });
         }
 
+        let listenerStatus = 'pending';
+        const appStatus = Number(rows[0].application_status);
+        if (appStatus === 2) {
+            listenerStatus = 'approve';
+        } else if (appStatus === 3) {
+            listenerStatus = 'reject';
+        } else {
+            listenerStatus = 'pending';
+        }
+
         res.status(200).json({
             status: true,
             message: 'Status fetched successfully.',
+            listener_status: listenerStatus,
             data: {
                 name: rows[0].name,
-                online: !!rows[0].available_now
+                online: !!rows[0].available_now,
+                listener_status: listenerStatus
             }
         });
 
