@@ -7,7 +7,15 @@ const { auth, verifyOtpToken } = require('../middleware/auth');
 const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const upload = require('../middleware/upload');
+const Pusher = require('pusher');
 
+const pusher = new Pusher({
+    appId: process.env.PUSHER_APP_ID,
+    key: process.env.PUSHER_KEY,
+    secret: process.env.PUSHER_SECRET,
+    cluster: process.env.PUSHER_CLUSTER,
+    useTLS: true
+});
 
 router.get('/listeners', auth, async (req, res) => {
     try {
@@ -2871,6 +2879,19 @@ router.post('/start-call', auth, async (req, res) => {
 
         const conversation = conversationRows[0];
         const BASE_URL = `${req.protocol}://${req.get('host')}`;
+
+        // Trigger Pusher notification for the listener
+        try {
+            await pusher.trigger(`listener.${parsedListenerId}`, "incoming-call", {
+                caller_name: req.user.name || "",
+                topic: "Voice Call Session",
+                conversation_id: conversation.id,
+                room_id: conversation.room_id,
+                listener_id: parsedListenerId,
+            });
+        } catch (pusherError) {
+            console.error("Pusher trigger error:", pusherError);
+        }
 
         return res.status(200).json({
             status: true,
