@@ -45,7 +45,12 @@ router.get('/listeners', auth, async (req, res) => {
         let index = 2;
 
         if (search) {
-            where += ` AND u.name ILIKE $${index}`;
+            where += ` AND (
+                u.name ILIKE $${index}
+                OR l.language_name ILIKE $${index}
+                OR i.interest_name ILIKE $${index}
+                OR v.vibe_name ILIKE $${index}
+            )`;
             values.push(`%${search}%`);
             index++;
         }
@@ -107,7 +112,10 @@ router.get('/listeners', auth, async (req, res) => {
             FROM users u
             JOIN listener_details ld ON ld.user_id = u.id
             LEFT JOIN listener_preferred_languages ul ON ul.user_id = u.id
+            LEFT JOIN languages l ON l.id = ul.language_id
             LEFT JOIN listener_interests li ON li.user_id = u.id
+            LEFT JOIN interests i ON i.id = li.interest_id
+            LEFT JOIN vibes v ON v.id = ld.vibe_id
             ${where}
         `;
         const { rows: countRows } = await pool.query(countQuery, values);
@@ -149,6 +157,9 @@ router.get('/listeners', auth, async (req, res) => {
 
             LEFT JOIN interests i
                  ON i.id = li.interest_id
+
+            LEFT JOIN vibes v
+                 ON v.id = ld.vibe_id
 
             ${where}
 
