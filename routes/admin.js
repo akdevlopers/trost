@@ -3612,6 +3612,41 @@ router.post('/approve-listener', auth, role('admin'), async (req, res) => {
     }
 });
 
+// POST /api/admin/reject-listener
+// Reject a listener's application
+// Body: { user_id }
+router.post('/reject-listener', auth, role('admin'), async (req, res) => {
+    try {
+        const { user_id } = req.body;
+
+        if (!user_id) {
+            return res.status(200).json({ status: false, message: 'user_id is required.' });
+        }
+
+        // Update application_status to 3 (rejected) and also flag individual components as rejected (2)
+        const result = await pool.query(
+            `UPDATE listener_details
+             SET profile_photo_status = 2,
+                 primary_voice_status = 2,
+                 secondary_voice_status = 2,
+                 application_status = 3
+             WHERE user_id = $1`,
+            [user_id]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(200).json({ status: false, message: 'Listener not found.' });
+        }
+
+        res.status(200).json({
+            status: true,
+            message: 'Listener application rejected successfully.'
+        });
+    } catch (error) {
+        res.status(200).json({ status: false, message: error.message });
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN ACCOUNT APIS
 // ─────────────────────────────────────────────────────────────────────────────

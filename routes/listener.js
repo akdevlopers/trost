@@ -563,6 +563,122 @@ router.post('/listener-reupload', upload.fields([
         }
     }
 );
+// POST /api/listener/reupload-rejected
+// Reupload media files (profile photo, primary voice, secondary voice) for a rejected listener
+router.post('/listener/reupload-rejected', auth, upload.fields([
+    { name: 'profile_photo', maxCount: 1 },
+    { name: 'primary_voice', maxCount: 1 },
+    { name: 'secondary_voice', maxCount: 1 }
+]), async (req, res) => {
+    try {
+        const user_id = req.user.id;
+
+        if (req.user.user_type !== 'listener') {
+            return res.status(200).json({
+                status: false,
+                message: "Access denied. Listener permissions required."
+            });
+        }
+
+        // Fetch listener details to verify they are rejected
+        const { rows } = await pool.query(
+            `SELECT application_status, profile_photo_status, primary_voice_status, secondary_voice_status 
+             FROM listener_details 
+             WHERE user_id = $1`,
+            [user_id]
+        );
+
+        if (rows.length === 0) {
+            return res.status(200).json({
+                status: false,
+                message: "Listener details not found."
+            });
+        }
+
+        const listener = rows[0];
+
+        // The vendor is rejected if application_status is 3, or if any of the media statuses are 2 (rejected)
+        if (Number(listener.application_status) !== 3 &&
+            Number(listener.profile_photo_status) !== 2 &&
+            Number(listener.primary_voice_status) !== 2 &&
+            Number(listener.secondary_voice_status) !== 2) {
+            return res.status(200).json({
+                status: false,
+                message: "This account or its media files are not rejected."
+            });
+        }
+
+        let updates = [];
+        let params = [];
+        let paramIndex = 1;
+
+        // Profile Photo
+        if (req.files?.profile_photo) {
+            const profilePhotoFilename = req.files.profile_photo[0].filename;
+
+            // Update users table
+            await pool.query(
+                `UPDATE users SET profile_photo = $1 WHERE id = $2`,
+                [profilePhotoFilename, user_id]
+            );
+
+            // Attempt to update profile_photo inside listener_details as well (safeguard)
+            try {
+                await pool.query(
+                    `UPDATE listener_details SET profile_photo = $1 WHERE user_id = $2`,
+                    [profilePhotoFilename, user_id]
+                );
+            } catch (err) {
+                console.warn("Could not update profile_photo in listener_details, skipping:", err.message);
+            }
+
+            updates.push(`profile_photo_status = 0`);
+        }
+
+        // Primary Voice
+        if (req.files?.primary_voice) {
+            const primaryVoiceFilename = req.files.primary_voice[0].filename;
+            updates.push(`primary_voice = $${paramIndex++}`);
+            params.push(primaryVoiceFilename);
+            updates.push(`primary_voice_status = 0`);
+        }
+
+        // Secondary Voice
+        if (req.files?.secondary_voice) {
+            const secondaryVoiceFilename = req.files.secondary_voice[0].filename;
+            updates.push(`secondary_voice = $${paramIndex++}`);
+            params.push(secondaryVoiceFilename);
+            updates.push(`secondary_voice_status = 0`);
+        }
+
+        if (updates.length === 0) {
+            return res.status(200).json({
+                status: false,
+                message: "No files uploaded to update."
+            });
+        }
+
+        // Reset application status to 1 (pending review)
+        updates.push(`application_status = 1`);
+
+        params.push(user_id);
+        const queryStr = `UPDATE listener_details SET ${updates.join(', ')} WHERE user_id = $${paramIndex}`;
+        await pool.query(queryStr, params);
+
+        res.status(200).json({
+            status: true,
+            message: "Reuploaded successfully. Application status is now pending review."
+        });
+
+    } catch (error) {
+        console.error("Reupload rejected error:", error);
+        res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    }
+});
+
 // GET /api/profile
 router.get('/profile', auth, async (req, res) => {
     try {
@@ -968,12 +1084,22 @@ router.post('/listener-login', async (req, res) => {
         );
 
         let listener = null;
+        let listenerStatus = 'pending';
         if (listenerDetails.length > 0) {
             listener = { ...listenerDetails[0] };
             const BASE_URL = `${req.protocol}://${req.get('host')}`;
             if (listener.profile_photo) listener.profile_photo = `${BASE_URL}/uploads/${listener.profile_photo}`;
             if (listener.primary_voice) listener.primary_voice = `${BASE_URL}/uploads/${listener.primary_voice}`;
             if (listener.secondary_voice) listener.secondary_voice = `${BASE_URL}/uploads/${listener.secondary_voice}`;
+
+            const appStatus = Number(listener.application_status);
+            if (appStatus === 2) {
+                listenerStatus = 'approve';
+            } else if (appStatus === 3) {
+                listenerStatus = 'reject';
+            } else {
+                listenerStatus = 'pending';
+            }
         }
 
         // Generate Access Token
@@ -994,15 +1120,20 @@ router.post('/listener-login', async (req, res) => {
             message: 'Login successful.',
             access_token: token,
             token_type: 'Bearer',
+            listener_status: listenerStatus,
             user: {
                 id: user.id,
                 name: user.name,
                 email: user.email,
                 phone: user.phone,
                 user_type: user.user_type,
-                profile_photo: user.profile_photo ? `${BASE_URL}/uploads/${user.profile_photo}` : null
+                profile_photo: user.profile_photo ? `${BASE_URL}/uploads/${user.profile_photo}` : null,
+                listener_status: listenerStatus
             },
-            listener_details: listener
+            listener_details: listener ? {
+                ...listener,
+                listener_status: listenerStatus
+            } : null
         });
 
     } catch (error) {
@@ -2490,7 +2621,7 @@ router.post('/listener/verify-email-otp', async (req, res) => {
                  email_otp = NULL,
                  otp_created_at = NULL
              WHERE email = $1`,
-             [email]
+            [email]
         );
 
         return res.status(200).json({ status: true, message: "Email verified successfully." });
