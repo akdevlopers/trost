@@ -5,14 +5,14 @@ require('dotenv').config();
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
     port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: false, // true for 465, false for other ports
+    secure: parseInt(process.env.SMTP_PORT || '587', 10) === 465, // true for 465, false for other ports
     auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
     },
-    connectionTimeout: 5000, // 5 seconds
-    greetingTimeout: 5000,   // 5 seconds
-    socketTimeout: 10000     // 10 seconds
+    connectionTimeout: 10000, // Increase to 10 seconds for more buffer on cloud servers
+    greetingTimeout: 10000,   // Increase to 10 seconds
+    socketTimeout: 20000     // Increase to 20 seconds
 });
 
 /**
