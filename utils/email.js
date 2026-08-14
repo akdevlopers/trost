@@ -26,50 +26,7 @@ const transporter = nodemailer.createTransport({
 async function sendEmail({ to, subject, text, html }) {
     const fromEmail = process.env.SMTP_FROM_EMAIL || 'no-reply@trostapp.com';
     const fromName = process.env.SMTP_FROM_NAME || 'Trost';
-    
-    // If using Brevo, send via HTTPS API to bypass cloud provider SMTP blocks
-    const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
-    const apiKey = process.env.BREVO_API_KEY || (process.env.SMTP_PASS && process.env.SMTP_PASS.startsWith('xkeysib-') ? process.env.SMTP_PASS : null);
-    if (host.includes('brevo.com') && apiKey) {
-        try {
-            console.log(`[Email] Attempting to send email to ${to} via Brevo HTTP API...`);
-            const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-                method: 'POST',
-                headers: {
-                    'accept': 'application/json',
-                    'content-type': 'application/json',
-                    'api-key': apiKey
-                },
-                body: JSON.stringify({
-                    sender: {
-                        name: fromName,
-                        email: fromEmail
-                    },
-                    to: [
-                        {
-                            email: to
-                        }
-                    ],
-                    subject: subject,
-                    htmlContent: html,
-                    textContent: text
-                })
-            });
 
-            if (response.ok) {
-                const result = await response.json();
-                console.log(`[Email] Sent successfully via Brevo HTTP API. Message ID: ${result.messageId}`);
-                return { status: true, messageId: result.messageId };
-            } else {
-                const errorBody = await response.text();
-                console.warn(`[Email] Brevo HTTP API returned status ${response.status}: ${errorBody}. Falling back to SMTP...`);
-            }
-        } catch (apiError) {
-            console.warn(`[Email] Brevo HTTP API error: ${apiError.message}. Falling back to SMTP...`);
-        }
-    }
-
-    // SMTP Fallback
     try {
         const mailOptions = {
             from: `"${fromName}" <${fromEmail}>`,
