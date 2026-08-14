@@ -409,6 +409,33 @@ router.post('/register', async (req, res) => {
 
         const registeredUser = result[0];
 
+        // Initialize user_minutes with 10 free minutes
+        try {
+            const { rows: existingMinutes } = await pool.query(
+                `SELECT id FROM user_minutes WHERE user_id = $1`,
+                [registeredUser.id]
+            );
+
+            if (existingMinutes.length === 0) {
+                await pool.query(
+                    `INSERT INTO user_minutes (user_id, free_minutes, purchased_minutes, remaining_minutes, updated_at)
+                     VALUES ($1, 10, 0, 10, NOW())`,
+                    [registeredUser.id]
+                );
+            } else {
+                await pool.query(
+                    `UPDATE user_minutes
+                     SET free_minutes = free_minutes + 10,
+                         remaining_minutes = remaining_minutes + 10,
+                         updated_at = NOW()
+                     WHERE user_id = $1`,
+                    [registeredUser.id]
+                );
+            }
+        } catch (walletError) {
+            console.error("Failed to add 10 free minutes to new user wallet:", walletError);
+        }
+
         // Generate JWT
         const token = jwt.sign(
             {
