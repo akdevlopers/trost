@@ -894,7 +894,7 @@ router.post('/forgot-password', async (req, res) => {
             return res.status(200).json({ status: false, message: 'No account found with this email.' });
 
         const otp = Math.floor(100000 + Math.random() * 900000);
-        await pool.query('UPDATE users SET otp = $1 WHERE email = $2', [otp, email]);
+        await pool.query('UPDATE users SET email_otp = $1, otp_created_at = NOW() WHERE email = $2', [otp, email]);
 
         // Send OTP to email in the background (non-blocking)
         sendOtpEmail(email, otp)
@@ -921,14 +921,21 @@ router.post('/verify-forgot-otp', async (req, res) => {
         if (!email || !otp)
             return res.status(200).json({ status: false, message: 'Email and OTP are required.' });
 
-        const { rows: users } = await pool.query('SELECT id, otp FROM users WHERE email = $1', [email]);
+        const { rows: users } = await pool.query('SELECT id, email_otp, otp_created_at FROM users WHERE email = $1', [email]);
         if (users.length === 0)
             return res.status(200).json({ status: false, message: 'User not found.' });
 
-        if (String(users[0].otp) !== String(otp))
+        if (String(users[0].email_otp) !== String(otp))
             return res.status(200).json({ status: false, message: 'Invalid OTP.' });
 
-        await pool.query('UPDATE users SET otp = NULL WHERE id = $1', [users[0].id]);
+        // Check expiration (5 minutes)
+        const otpTime = new Date(users[0].otp_created_at).getTime();
+        const now = Date.now();
+        if (now - otpTime > 5 * 60 * 1000) {
+            return res.status(200).json({ status: false, message: 'OTP has expired. Please request a new OTP.' });
+        }
+
+        await pool.query('UPDATE users SET email_otp = NULL, otp_created_at = NULL WHERE id = $1', [users[0].id]);
 
         // Issue a short-lived reset token (10 min)
         const resetToken = jwt.sign(
