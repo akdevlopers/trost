@@ -256,12 +256,8 @@ router.get('/listeners-list', async (req, res) => {
             profile_photo: listener.profile_photo
                 ? `${BASE_URL}/uploads/${listener.profile_photo}`
                 : null,
-            primary_voice: listener.primary_voice
-                ? `${BASE_URL}/uploads/${listener.primary_voice}`
-                : null,
-            secondary_voice: listener.secondary_voice
-                ? `${BASE_URL}/uploads/${listener.secondary_voice}`
-                : null
+            primary_voice: null,
+            secondary_voice: null
         }));
 
         res.status(200).json({
@@ -3362,4 +3358,4 @@ const endCallHandler = async (req, res) => {
 router.post('/end-call', auth, endCallHandler);
 
 module.exports = router;
-module.exports.endCallHandler = endCallHandler;
+module.exports.endCallHandler = endCallHandler;
