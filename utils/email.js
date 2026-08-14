@@ -29,7 +29,8 @@ async function sendEmail({ to, subject, text, html }) {
     
     // If using Brevo, send via HTTPS API to bypass cloud provider SMTP blocks
     const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
-    if (host.includes('brevo.com') && process.env.SMTP_PASS) {
+    const apiKey = process.env.BREVO_API_KEY || (process.env.SMTP_PASS && process.env.SMTP_PASS.startsWith('xkeysib-') ? process.env.SMTP_PASS : null);
+    if (host.includes('brevo.com') && apiKey) {
         try {
             console.log(`[Email] Attempting to send email to ${to} via Brevo HTTP API...`);
             const response = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -37,7 +38,7 @@ async function sendEmail({ to, subject, text, html }) {
                 headers: {
                     'accept': 'application/json',
                     'content-type': 'application/json',
-                    'api-key': process.env.SMTP_PASS
+                    'api-key': apiKey
                 },
                 body: JSON.stringify({
                     sender: {
