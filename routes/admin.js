@@ -495,6 +495,7 @@ router.post('/secondary-voice-status', auth, role('admin'), async (req, res) => 
             if (Number(l.profile_photo_status) === 1 && Number(l.primary_voice_status) === 1 && Number(l.secondary_voice_status) === 1 && Number(l.application_status) !== 2) {
                 await pool.query('UPDATE listener_details SET application_status = 2 WHERE user_id = $1', [user_id]);
                 autoApproved = true;
+                sendWelcomeEmailOnApproval(user_id).catch(err => console.error(err));
             }
         }
 
@@ -3588,6 +3589,10 @@ router.post('/update-application-status', auth, role('admin'), async (req, res) 
         if (result.rowCount === 0)
             return res.status(200).json({ status: false, message: 'Listener not found.' });
 
+        if (Number(application_status) === 2) {
+            sendWelcomeEmailOnApproval(user_id).catch(err => console.error(err));
+        }
+
         const labels = { 1: 'submitted', 2: 'approved', 3: 'rejected' };
         res.status(200).json({ status: true, message: `Application status updated to '${labels[Number(application_status)]}' successfully.` });
     } catch (error) {
@@ -3621,6 +3626,9 @@ router.post('/approve-listener', auth, role('admin'), async (req, res) => {
         if (result.rowCount === 0) {
             return res.status(200).json({ status: false, message: 'Listener not found.' });
         }
+
+        // Send listener welcome email in background
+        sendWelcomeEmailOnApproval(user_id).catch(err => console.error(err));
 
         res.status(200).json({
             status: true,
@@ -3946,6 +3954,7 @@ router.post('/update-media-status', auth, role('admin'), async (req, res) => {
             if (Number(l.profile_photo_status) === 1 && Number(l.primary_voice_status) === 1 && Number(l.secondary_voice_status) === 1 && Number(l.application_status) !== 2) {
                 await pool.query('UPDATE listener_details SET application_status = 2 WHERE user_id = $1', [user_id]);
                 autoApproved = true;
+                sendWelcomeEmailOnApproval(user_id).catch(err => console.error(err));
             }
         }
 

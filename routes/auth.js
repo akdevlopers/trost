@@ -988,4 +988,27 @@ router.post('/logout', auth, async (req, res) => {
 //         res.status(200).json({ status: false, message: error.message });
 //     }
 // });
+// POST /api/early-bird
+router.post('/early-bird', async (req, res) => {
+    try {
+        const { name, email } = req.body;
+        if (!email || !name) {
+            return res.status(200).json({ status: false, message: 'Name and email are required.' });
+        }
+        const cleanEmail = email.trim().toLowerCase();
+        
+        // Send Early Bird Confirmation Email in background
+        const { sendEarlyBirdConfirmationEmail } = require('../utils/email');
+        sendEarlyBirdConfirmationEmail(cleanEmail, name)
+            .catch(err => console.error("Failed to send early bird email:", err));
+
+        return res.status(200).json({
+            status: true,
+            message: 'Successfully registered for early access. Confirmation email sent!'
+        });
+    } catch (error) {
+        return res.status(200).json({ status: false, message: error.message });
+    }
+});
+
 module.exports = router;
