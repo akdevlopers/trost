@@ -27,6 +27,23 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
             password
         } = req.body;
 
+        if (university_email) {
+            const cleanEmail = university_email.trim().toLowerCase();
+            const { rows: users } = await pool.query(
+                "SELECT id, user_type, password FROM users WHERE email = $1",
+                [cleanEmail]
+            );
+            if (users.length > 0) {
+                const existingUser = users[0];
+                if (existingUser.password && existingUser.user_type === 'user') {
+                    return res.status(200).json({
+                        status: false,
+                        message: "This email is already registered as a user."
+                    }, 200);
+                }
+            }
+        }
+
         if (!bio || bio.trim() === "") {
             return res.status(200).json({
                 status: false,
@@ -142,12 +159,19 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
 
         // Check user by university email
         const { rows: users } = await pool.query(
-            "SELECT id FROM users WHERE email = $1",
+            "SELECT id, user_type, password FROM users WHERE email = $1",
             [university_email]
         );
         let userId;
         if (users.length > 0) {
-            userId = users[0].id;
+            const existingUser = users[0];
+            if (existingUser.password && existingUser.user_type === 'user') {
+                return res.status(200).json({
+                    status: false,
+                    message: "This email is already registered as a user."
+                }, 200);
+            }
+            userId = existingUser.id;
             // Update existing user including password
             await pool.query(
                 `UPDATE users
@@ -2561,6 +2585,9 @@ router.post('/listener/send-email-otp', async (req, res) => {
 
         // Account with password already exists
         if (users.length > 0 && users[0].password) {
+            if (users[0].user_type === 'user') {
+                return res.status(200).json({ status: false, message: "This email is already registered as a user." });
+            }
             return res.status(200).json({ status: false, message: "Email already registered." });
         }
 

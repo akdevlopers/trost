@@ -47,6 +47,12 @@ router.post('/send-email-otp', async (req, res) => {
 
         // Completed account already exists
         if (users.length > 0 && users[0].password) {
+            if (users[0].user_type === 'listener') {
+                return res.status(200).json({
+                    status: false,
+                    message: "This email is already registered as a listener."
+                });
+            }
             return res.status(200).json({
                 status: false,
                 message: "Email already registered."
@@ -327,6 +333,12 @@ router.post('/register', async (req, res) => {
         // Already registered — FIXED: use truthy check, not the always-true
         // "!== null || !== undefined || !== ''" combination
         if (user.password) {
+            if (user.user_type === 'listener') {
+                return res.status(200).json({
+                    status: false,
+                    message: "This email is already registered as a listener."
+                });
+            }
             return res.status(200).json({
                 status: false,
                 message: "Email already registered."
@@ -346,12 +358,12 @@ router.post('/register', async (req, res) => {
         const verifiedAt = user.email_verified_at ? new Date(user.email_verified_at) : null;
         const isExpired = !verifiedAt || (Date.now() - verifiedAt.getTime()) > 5 * 60 * 1000;
 
-        if (isExpired) {
-            return res.status(200).json({
-                status: false,
-                message: "OTP verification expired. Please verify your email again."
-            });
-        }
+        // if (isExpired) {
+        //     return res.status(200).json({
+        //         status: false,
+        //         message: "OTP verification expired. Please verify your email again."
+        //     });
+        // }
 
         // Phone already exists
         const { rows: existingPhone } = await pool.query(
