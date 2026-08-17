@@ -282,12 +282,12 @@ router.post('/register', async (req, res) => {
         // Phone validation (10 digits)
         const phoneRegex = /^[0-9]{10}$/;
 
-        if (!phoneRegex.test(phone)) {
-            return res.status(200).json({
-                status: false,
-                message: "Phone number must be exactly 10 digits."
-            });
-        }
+        // if (!phoneRegex.test(phone)) {
+        //     return res.status(200).json({
+        //         status: false,
+        //         message: "Phone number must be exactly 10 digits."
+        //     });
+        // }
 
         // Password validation
         if (password.length < 8) {
