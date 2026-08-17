@@ -1824,10 +1824,11 @@ router.get('/listener-details/:listener_id', auth, async (req, res) => {
                 u.id,
                 u.name,
                 u.profile_photo,
+                u.rating AS overall_rating,
 
                 ld.tagline,
                 ld.bio,
-                ld.rating,
+                u.rating AS rating,
                 ld.total_reviews,
                 ld.total_calls,
                 ld.available_now,
@@ -1911,6 +1912,57 @@ router.get('/listener-details/:listener_id', auth, async (req, res) => {
 
         listener.languages = languages;
         listener.interests = interests;
+
+        // Fetch Reviews/Ratings
+        const { rows: reviews } = await pool.query(
+            `SELECT
+                id,
+                rating,
+                review,
+                created_at,
+                user_id,
+                name,
+                profile_photo
+            FROM (
+                SELECT
+                    lr.id,
+                    lr.rating,
+                    lr.review,
+                    lr.created_at,
+                    u.id AS user_id,
+                    u.name,
+                    u.profile_photo
+                FROM listener_reviews lr
+                JOIN users u ON u.id = lr.user_id
+                WHERE lr.listener_id = $1
+
+                UNION ALL
+
+                SELECT
+                    uc.id,
+                    uc.rating,
+                    uc.review,
+                    uc.ended_at AS created_at,
+                    u.id AS user_id,
+                    u.name,
+                    u.profile_photo
+                FROM user_conversations uc
+                JOIN users u ON u.id = uc.user_id
+                WHERE uc.listener_id = $1 AND uc.rating IS NOT NULL AND uc.ended_at IS NOT NULL
+            ) combined
+            ORDER BY created_at DESC`,
+            [listener_id]
+        );
+
+        if (reviews.length > 0) {
+            reviews.forEach(review => {
+                if (review.profile_photo) {
+                    review.profile_photo = `${BASE_URL}/${review.profile_photo}`;
+                }
+            });
+        }
+        listener.reviews = reviews;
+        listener.ratings = reviews;
 
         return res.status(200).json({
             status: true,
