@@ -1351,7 +1351,7 @@ router.post('/listener/dashboard', auth, async (req, res) => {
                 room_id: s.room_id || null,
                 topic: s.review ? s.review.substring(0, 20) + "..." : "Support Session",
                 time: start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-                rating: s.rating ? Number(s.rating).toFixed(1) : "5.0",
+                rating: s.rating ? Number(s.rating).toFixed(1) : "0",
                 duration: `${durationMin}m`,
                 earnings: earnings > 0 ? `$${earnings.toFixed(2)}` : "$0.00"
             };
@@ -1362,7 +1362,7 @@ router.post('/listener/dashboard', auth, async (req, res) => {
             id: index + 1,
             user_name: r.user_name || "Anonymous",
             review_text: r.review || "No feedback text provided.",
-            rating: Number(r.rating || 5.0).toFixed(1),
+            rating: Number(r.rating || 0).toFixed(1),
             topic: "General Support"
         }));
 
