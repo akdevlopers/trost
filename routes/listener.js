@@ -309,6 +309,11 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
 
         }
 
+        // Send Pending Review Email in the background
+        const { sendPendingReviewEmail } = require('../utils/email');
+        sendPendingReviewEmail(university_email, full_name)
+            .catch(err => console.error("Failed to send pending review email to listener:", err));
+
         res.status(200).json({
             status: true,
             message: "Listener application submitted successfully."

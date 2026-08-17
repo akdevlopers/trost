@@ -34,6 +34,23 @@ async function isActuallyAudio(filePath) {
     }
 }
 
+// Helper to send welcome email upon listener approval
+async function sendWelcomeEmailOnApproval(userId) {
+    try {
+        const { rows } = await pool.query(
+            "SELECT name, email FROM users WHERE id = $1",
+            [userId]
+        );
+        if (rows.length > 0) {
+            const { name, email } = rows[0];
+            const { sendListenerWelcomeEmail } = require('../utils/email');
+            await sendListenerWelcomeEmail(email, name);
+            console.log(`[Email] Listener welcome email successfully sent to ${email}`);
+        }
+    } catch (err) {
+        console.error("[Email] Failed to send listener welcome email:", err);
+    }
+}
 
 // POST /api/admin/login
 router.post('/login', async (req, res) => {
@@ -348,6 +365,7 @@ router.post('/profile-photo-status', auth, role('admin'), async (req, res) => {
             if (Number(l.profile_photo_status) === 1 && Number(l.primary_voice_status) === 1 && Number(l.secondary_voice_status) === 1 && Number(l.application_status) !== 2) {
                 await pool.query('UPDATE listener_details SET application_status = 2 WHERE user_id = $1', [user_id]);
                 autoApproved = true;
+                sendWelcomeEmailOnApproval(user_id).catch(err => console.error(err));
             }
         }
 
@@ -412,6 +430,7 @@ router.post('/primary-voice-status', auth, role('admin'), async (req, res) => {
             if (Number(l.profile_photo_status) === 1 && Number(l.primary_voice_status) === 1 && Number(l.secondary_voice_status) === 1 && Number(l.application_status) !== 2) {
                 await pool.query('UPDATE listener_details SET application_status = 2 WHERE user_id = $1', [user_id]);
                 autoApproved = true;
+                sendWelcomeEmailOnApproval(user_id).catch(err => console.error(err));
             }
         }
 

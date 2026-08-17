@@ -460,6 +460,11 @@ router.post('/register', async (req, res) => {
             }
         );
 
+        // Send Client Welcome Email in the background
+        const { sendClientWelcomeEmail } = require('../utils/email');
+        sendClientWelcomeEmail(registeredUser.email, registeredUser.name)
+            .catch(err => console.error("Failed to send welcome email to client:", err));
+
         return res.status(200).json({
             status: true,
             message: "Registration successful.",

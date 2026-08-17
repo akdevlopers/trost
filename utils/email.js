@@ -114,8 +114,158 @@ async function sendOtpEmail(to, otp) {
     return sendEmail({ to, subject, text, html });
 }
 
+/**
+ * Send Client Welcome Email
+ * @param {string} to - Recipient email address
+ * @param {string} name - Recipient's name
+ */
+async function sendClientWelcomeEmail(to, name) {
+    const subject = 'Welcome to Trost!';
+    const text = `Hello ${name},\n\nWelcome to Trost! Your account has been registered successfully. We are excited to have you on board.`;
+    const html = `
+        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1a202c;">
+            <div style="text-align: center; margin-bottom: 25px;">
+                <h1 style="color: #6366f1; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Trost</h1>
+            </div>
+            <h2 style="color: #2d3748; font-size: 22px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">Welcome to Trost, ${name}!</h2>
+            <p style="font-size: 16px; line-height: 1.6; color: #4a5568; margin-bottom: 20px;">
+                We are thrilled to welcome you to our community. Trost is here to provide you with a safe, confidential space to talk, connect, and find support whenever you need it.
+            </p>
+            <p style="font-size: 16px; line-height: 1.6; color: #4a5568; margin-bottom: 25px;">
+                You can now log in to your account, explore our directory of active listeners, and start a call at any time.
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="https://trostapp.com/login" style="background-color: #6366f1; color: #ffffff; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-size: 16px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.4);">
+                    Explore Trost
+                </a>
+            </div>
+            <p style="font-size: 14px; line-height: 1.5; color: #718096; margin-bottom: 0;">
+                If you have any questions or need assistance, our support team is always here to help. Just reply to this email!
+            </p>
+            <hr style="border: none; border-top: 1px solid #edf2f7; margin: 25px 0;" />
+            <p style="font-size: 12px; color: #a0aec0; text-align: center; margin: 0;">
+                &copy; 2026 Trost. All rights reserved.
+            </p>
+        </div>
+    `;
+    return sendEmail({ to, subject, text, html });
+}
+
+/**
+ * Send Pending Review Email (sent when listener submits application)
+ * @param {string} to - Recipient email address
+ * @param {string} name - Recipient's name
+ */
+async function sendPendingReviewEmail(to, name) {
+    const subject = 'Your Trost Listener Application is Under Review';
+    const text = `Hello ${name},\n\nThank you for applying to be a listener on Trost! Your application has been successfully submitted and is currently under review. We will notify you once the evaluation is complete.`;
+    const html = `
+        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1a202c;">
+            <div style="text-align: center; margin-bottom: 25px;">
+                <h1 style="color: #6366f1; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Trost</h1>
+            </div>
+            <h2 style="color: #2d3748; font-size: 22px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">Application Received!</h2>
+            <p style="font-size: 16px; line-height: 1.6; color: #4a5568; margin-bottom: 20px;">
+                Hello ${name}, thank you for applying to join the Trost community as a listener. We are excited about your interest in helping others.
+            </p>
+            <p style="font-size: 16px; line-height: 1.6; color: #4a5568; margin-bottom: 20px;">
+                Your application, voice samples, and profile details have been successfully received and are currently being reviewed by our administration team.
+            </p>
+            <div style="background-color: #f7fafc; border-left: 4px solid #6366f1; padding: 15px; margin: 25px 0; border-radius: 0 8px 8px 0;">
+                <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #4a5568; font-weight: 500;">
+                    <strong>Current Status:</strong> Pending Review<br/>
+                    We typically complete the evaluation within 24-48 hours. We will notify you by email as soon as a decision is made.
+                </p>
+            </div>
+            <p style="font-size: 14px; line-height: 1.5; color: #718096; margin-bottom: 0;">
+                If you need to make changes to your application or have questions in the meantime, please contact our review board at support@trostapp.com.
+            </p>
+            <hr style="border: none; border-top: 1px solid #edf2f7; margin: 25px 0;" />
+            <p style="font-size: 12px; color: #a0aec0; text-align: center; margin: 0;">
+                &copy; 2026 Trost. All rights reserved.
+            </p>
+        </div>
+    `;
+    return sendEmail({ to, subject, text, html });
+}
+
+/**
+ * Send Listener Welcome Email (sent on admin approval)
+ * @param {string} to - Recipient email address
+ * @param {string} name - Recipient's name
+ */
+async function sendListenerWelcomeEmail(to, name) {
+    const subject = 'Congratulations! Your Trost Listener Application is Approved';
+    const text = `Hello ${name},\n\nCongratulations! Your application to be a listener on Trost has been approved. You can now log in, go online, and start helping callers.`;
+    const html = `
+        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1a202c;">
+            <div style="text-align: center; margin-bottom: 25px;">
+                <h1 style="color: #10b981; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Trost</h1>
+            </div>
+            <h2 style="color: #2d3748; font-size: 22px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">Congratulations, ${name}!</h2>
+            <p style="font-size: 16px; line-height: 1.6; color: #4a5568; margin-bottom: 20px;">
+                We are thrilled to inform you that your application to be a listener has been <strong>approved</strong>! Welcome to the active listener team.
+            </p>
+            <p style="font-size: 16px; line-height: 1.6; color: #4a5568; margin-bottom: 25px;">
+                Your profile is now live. You can log in to the Listener Dashboard, set your status to active, and start accepting support calls.
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="https://trostapp.com/listener/dashboard" style="background-color: #10b981; color: #ffffff; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-size: 16px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.4);">
+                    Go to Dashboard
+                </a>
+            </div>
+            <p style="font-size: 14px; line-height: 1.5; color: #718096; margin-bottom: 0;">
+                Thank you for dedication to making a difference. Let's build a supportive world together.
+            </p>
+            <hr style="border: none; border-top: 1px solid #edf2f7; margin: 25px 0;" />
+            <p style="font-size: 12px; color: #a0aec0; text-align: center; margin: 0;">
+                &copy; 2026 Trost. All rights reserved.
+            </p>
+        </div>
+    `;
+    return sendEmail({ to, subject, text, html });
+}
+
+/**
+ * Send Early Bird Confirmation Email
+ * @param {string} to - Recipient email address
+ * @param {string} name - Recipient's name
+ */
+async function sendEarlyBirdConfirmationEmail(to, name) {
+    const subject = 'You are on the list! Trost Early Bird Access';
+    const text = `Hello ${name},\n\nThank you for signing up for early access to Trost. You are officially confirmed as an early bird member. We will notify you as soon as early access begins!`;
+    const html = `
+        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1a202c;">
+            <div style="text-align: center; margin-bottom: 25px;">
+                <h1 style="color: #6366f1; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Trost</h1>
+            </div>
+            <h2 style="color: #2d3748; font-size: 22px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">Early Bird Confirmed!</h2>
+            <p style="font-size: 16px; line-height: 1.6; color: #4a5568; margin-bottom: 20px;">
+                Hello ${name}, thank you for joining our early bird waitlist!
+            </p>
+            <p style="font-size: 16px; line-height: 1.6; color: #4a5568; margin-bottom: 25px;">
+                As an early bird member, you'll receive priority access when Trost officially opens registration, along with exclusive updates and special early-access perks.
+            </p>
+            <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; padding: 15px; border-radius: 8px; margin-bottom: 25px;">
+                <p style="margin: 0; font-size: 15px; color: #1e3a8a; font-weight: 500; text-align: center;">
+                    🚀 You are officially on the list! Stay tuned for launch details.
+                </p>
+            </div>
+            <hr style="border: none; border-top: 1px solid #edf2f7; margin: 25px 0;" />
+            <p style="font-size: 12px; color: #a0aec0; text-align: center; margin: 0;">
+                &copy; 2026 Trost. All rights reserved.
+            </p>
+        </div>
+    `;
+    return sendEmail({ to, subject, text, html });
+}
+
 module.exports = {
     sendEmail,
     sendOtpEmail,
+    sendClientWelcomeEmail,
+    sendPendingReviewEmail,
+    sendListenerWelcomeEmail,
+    sendEarlyBirdConfirmationEmail,
     transporter
 };
