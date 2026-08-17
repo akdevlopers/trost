@@ -71,6 +71,19 @@ async function initDb() {
             console.log("[DB Init] Default setting 'listener_rate_per_minute' inserted (0.20).");
         }
 
+        // 5. Add rating and review columns to user_conversations if not present
+        await pool.query(`
+            ALTER TABLE user_conversations 
+            ADD COLUMN IF NOT EXISTS rating INTEGER,
+            ADD COLUMN IF NOT EXISTS review TEXT;
+        `);
+
+        // 6. Add rating column to users if not present
+        await pool.query(`
+            ALTER TABLE users 
+            ADD COLUMN IF NOT EXISTS rating NUMERIC(3, 2) DEFAULT 0.00;
+        `);
+
         console.log('[DB Init] Schema updates verified successfully.');
     } catch (error) {
         console.error('[DB Init] Error during database initialization:', error);

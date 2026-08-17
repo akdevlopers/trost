@@ -835,6 +835,8 @@ router.get('/conversations', auth, async (req, res) => {
                 ld.rating AS listener_rating,
                 c.started_at,
                 c.ended_at,
+                c.rating,
+                c.review,
                 ROUND(EXTRACT(EPOCH FROM (c.ended_at - c.started_at))/60) AS duration_minutes
             FROM user_conversations c
             JOIN users u
@@ -862,7 +864,9 @@ router.get('/conversations', auth, async (req, res) => {
                 : null,
             started_at: item.started_at,
             ended_at: item.ended_at,
-            duration_minutes: Number(item.duration_minutes)
+            duration_minutes: Number(item.duration_minutes),
+            rating: item.rating ? Number(item.rating) : null,
+            review: item.review || null
         }));
 
         return res.status(200).json({
@@ -2045,6 +2049,16 @@ router.post('/rate-listener', auth, async (req, res) => {
             ]
         );
 
+        await client.query(
+            `UPDATE users
+             SET rating = $1
+             WHERE id = $2`,
+            [
+                stats[0].rating,
+                listener_id
+            ]
+        );
+
         await client.query("COMMIT");
 
         return res.status(200).json({
@@ -2153,6 +2167,8 @@ router.get('/conversation/:id', auth, async (req, res) => {
                 END AS minutes_used,
 
                 uc.status,
+                uc.rating AS call_rating,
+                uc.review AS call_review,
 
                 u.id AS listener_id,
                 u.name AS listener_name,
@@ -2201,17 +2217,41 @@ router.get('/conversation/:id', auth, async (req, res) => {
         // Fetch Reviews
         const { rows: reviews } = await pool.query(
             `SELECT
-                lr.id,
-                lr.rating,
-                lr.review,
-                lr.created_at,
-                u.id AS user_id,
-                u.name,
-                u.profile_photo
-            FROM listener_reviews lr
-            JOIN users u ON u.id = lr.user_id
-            WHERE lr.listener_id = $1
-            ORDER BY lr.created_at DESC`,
+                id,
+                rating,
+                review,
+                created_at,
+                user_id,
+                name,
+                profile_photo
+            FROM (
+                SELECT
+                    lr.id,
+                    lr.rating,
+                    lr.review,
+                    lr.created_at,
+                    u.id AS user_id,
+                    u.name,
+                    u.profile_photo
+                FROM listener_reviews lr
+                JOIN users u ON u.id = lr.user_id
+                WHERE lr.listener_id = $1
+
+                UNION ALL
+
+                SELECT
+                    uc.id,
+                    uc.rating,
+                    uc.review,
+                    uc.ended_at AS created_at,
+                    u.id AS user_id,
+                    u.name,
+                    u.profile_photo
+                FROM user_conversations uc
+                JOIN users u ON u.id = uc.user_id
+                WHERE uc.listener_id = $1 AND uc.rating IS NOT NULL AND uc.ended_at IS NOT NULL
+            ) combined
+            ORDER BY created_at DESC`,
             [conversation.listener_id]
         );
 
@@ -2274,26 +2314,45 @@ router.get('/listener-reviews/:listener_id', auth, async (req, res) => {
     try {
 
         const listener_id = req.params.listener_id;
+        const BASE_URL = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
 
         const { rows } = await pool.query(
             `SELECT
-                lr.id,
-                lr.rating,
-                lr.review,
-                lr.created_at,
+                id,
+                rating,
+                review,
+                created_at,
+                user_id,
+                name,
+                profile_photo
+            FROM (
+                SELECT
+                    lr.id,
+                    lr.rating,
+                    lr.review,
+                    lr.created_at,
+                    u.id AS user_id,
+                    u.name,
+                    u.profile_photo
+                FROM listener_reviews lr
+                JOIN users u ON u.id = lr.user_id
+                WHERE lr.listener_id = $1
 
-                u.id AS user_id,
-                u.name,
-                u.profile_photo
+                UNION ALL
 
-            FROM listener_reviews lr
-
-            JOIN users u
-                ON u.id = lr.user_id
-
-            WHERE lr.listener_id = $1
-
-            ORDER BY lr.created_at DESC`,
+                SELECT
+                    uc.id,
+                    uc.rating,
+                    uc.review,
+                    uc.ended_at AS created_at,
+                    u.id AS user_id,
+                    u.name,
+                    u.profile_photo
+                FROM user_conversations uc
+                JOIN users u ON u.id = uc.user_id
+                WHERE uc.listener_id = $1 AND uc.rating IS NOT NULL AND uc.ended_at IS NOT NULL
+            ) combined
+            ORDER BY created_at DESC`,
             [listener_id]
         );
 
@@ -3357,5 +3416,150 @@ const endCallHandler = async (req, res) => {
 
 router.post('/end-call', auth, endCallHandler);
 
+// POST /api/rate-call - Rate a finished call
+const rateCallHandler = async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const user_id = req.user.id;
+        const { conversation_id, call_id, rating, review } = req.body ?? {};
+
+        const convId = conversation_id || call_id;
+        if (!convId) {
+            return res.status(200).json({
+                status: false,
+                message: "conversation_id is required."
+            });
+        }
+
+        const parsedConvId = Number(convId);
+        if (isNaN(parsedConvId) || !Number.isInteger(parsedConvId) || parsedConvId <= 0) {
+            return res.status(200).json({
+                status: false,
+                message: "conversation_id must be a valid positive integer."
+            });
+        }
+
+        if (rating === undefined || rating === null) {
+            return res.status(200).json({
+                status: false,
+                message: "rating is required."
+            });
+        }
+
+        const parsedRating = Number(rating);
+        if (isNaN(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+            return res.status(200).json({
+                status: false,
+                message: "Rating must be an integer between 1 and 5."
+            });
+        }
+
+        await client.query("BEGIN");
+
+        // 1. Fetch conversation to verify details and ownership
+        const { rows: convRows } = await client.query(
+            `SELECT id, user_id, listener_id, status, ended_at 
+             FROM user_conversations 
+             WHERE id = $1`,
+            [parsedConvId]
+        );
+
+        if (convRows.length === 0) {
+            await client.query("ROLLBACK");
+            return res.status(200).json({
+                status: false,
+                message: "Conversation not found."
+            });
+        }
+
+        const conversation = convRows[0];
+
+        // 2. Validate that requesting user is the caller (user_id)
+        if (conversation.user_id !== user_id) {
+            await client.query("ROLLBACK");
+            return res.status(200).json({
+                status: false,
+                message: "Unauthorized. Only the caller can rate the call."
+            });
+        }
+
+        // 3. Validate that call is finished
+        if (!conversation.ended_at && conversation.status !== 'completed') {
+            await client.query("ROLLBACK");
+            return res.status(200).json({
+                status: false,
+                message: "Cannot rate an active or unfinished call."
+            });
+        }
+
+        // 4. Update rating and review in user_conversations table
+        await client.query(
+            `UPDATE user_conversations
+             SET rating = $1,
+                 review = $2
+             WHERE id = $3`,
+            [parsedRating, review || null, parsedConvId]
+        );
+
+        // 5. Recalculate average rating and total reviews count for the listener
+        const listenerId = conversation.listener_id;
+        const { rows: statsRows } = await client.query(
+            `SELECT 
+                ROUND(AVG(rating)::numeric, 1) AS avg_rating,
+                COUNT(*) AS total_reviews
+             FROM user_conversations
+             WHERE listener_id = $1 AND rating IS NOT NULL`,
+            [listenerId]
+        );
+
+        const newRating = statsRows[0]?.avg_rating ? Number(statsRows[0].avg_rating) : 0.00;
+        const totalReviews = statsRows[0]?.total_reviews ? Number(statsRows[0].total_reviews) : 0;
+
+        // 6. Update rating in the listener_details table
+        await client.query(
+            `UPDATE listener_details
+             SET rating = $1,
+                 total_reviews = $2
+             WHERE user_id = $3`,
+            [newRating, totalReviews, listenerId]
+        );
+
+        // 7. Update rating in the users table (overall rating for listener)
+        await client.query(
+            `UPDATE users
+             SET rating = $1
+             WHERE id = $2`,
+            [newRating, listenerId]
+        );
+
+        await client.query("COMMIT");
+
+        return res.status(200).json({
+            status: true,
+            message: "Call rated successfully.",
+            data: {
+                conversation_id: parsedConvId,
+                rating: parsedRating,
+                review: review || null,
+                listener_overall_rating: newRating,
+                listener_total_reviews: totalReviews
+            }
+        });
+
+    } catch (error) {
+        await client.query("ROLLBACK");
+        console.error("Rate call error:", error);
+        return res.status(200).json({
+            status: false,
+            message: error.message
+        });
+    } finally {
+        client.release();
+    }
+};
+
+router.post('/rate-call', auth, rateCallHandler);
+
 module.exports = router;
 module.exports.endCallHandler = endCallHandler;
+module.exports.rateCallHandler = rateCallHandler;

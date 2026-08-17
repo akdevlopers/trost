@@ -1204,21 +1204,30 @@ router.post('/listener/dashboard', auth, async (req, res) => {
 
         // 4. Fetch caller reviews
         const { rows: dbReviews } = await pool.query(
-            `SELECT lr.rating, lr.review, lr.created_at, u.name AS user_name
-             FROM listener_reviews lr
-             JOIN users u ON u.id = lr.user_id
-             WHERE lr.listener_id = $1
-             ORDER BY lr.created_at DESC
+            `SELECT rating, review, created_at, user_name
+             FROM (
+                 SELECT lr.rating, lr.review, lr.created_at, u.name AS user_name
+                 FROM listener_reviews lr
+                 JOIN users u ON u.id = lr.user_id
+                 WHERE lr.listener_id = $1
+                 
+                 UNION ALL
+                 
+                 SELECT uc.rating, uc.review, uc.ended_at AS created_at, u.name AS user_name
+                 FROM user_conversations uc
+                 JOIN users u ON u.id = uc.user_id
+                 WHERE uc.listener_id = $1 AND uc.rating IS NOT NULL AND uc.ended_at IS NOT NULL
+             ) combined
+             ORDER BY created_at DESC
              LIMIT 10`,
             [user_id]
         );
 
         // 5. Fetch completed sessions
         const { rows: dbSessions } = await pool.query(
-            `SELECT uc.id, uc.room_id, uc.started_at, uc.ended_at, u.name AS user_name, lr.rating, lr.review
+            `SELECT uc.id, uc.room_id, uc.started_at, uc.ended_at, u.name AS user_name, uc.rating, uc.review
              FROM user_conversations uc
              JOIN users u ON uc.user_id = u.id
-             LEFT JOIN listener_reviews lr ON lr.listener_id = uc.listener_id AND lr.user_id = uc.user_id
              WHERE uc.listener_id = $1 AND uc.status = 'completed'
              ORDER BY uc.started_at DESC
              LIMIT 10`,
@@ -1805,18 +1814,33 @@ router.post('/listener/reviews', auth, async (req, res) => {
 
         // 1. Fetch total count of reviews
         const { rows: countRows } = await pool.query(
-            `SELECT COUNT(*) AS total FROM listener_reviews WHERE listener_id = $1`,
+            `SELECT COUNT(*) AS total 
+             FROM (
+                 SELECT id FROM listener_reviews WHERE listener_id = $1
+                 UNION ALL
+                 SELECT id FROM user_conversations WHERE listener_id = $1 AND rating IS NOT NULL AND ended_at IS NOT NULL
+             ) combined`,
             [user_id]
         );
         const total = parseInt(countRows[0]?.total || 0);
 
         // 2. Fetch paginated reviews from DB
         const { rows: dbReviews } = await pool.query(
-            `SELECT lr.rating, lr.review, lr.created_at, lr.user_id, u.name AS user_name
-             FROM listener_reviews lr
-             JOIN users u ON u.id = lr.user_id
-             WHERE lr.listener_id = $1
-             ORDER BY lr.created_at DESC
+            `SELECT rating, review, created_at, user_id, user_name
+             FROM (
+                 SELECT lr.rating, lr.review, lr.created_at, lr.user_id, u.name AS user_name
+                 FROM listener_reviews lr
+                 JOIN users u ON u.id = lr.user_id
+                 WHERE lr.listener_id = $1
+                 
+                 UNION ALL
+                 
+                 SELECT uc.rating, uc.review, uc.ended_at AS created_at, uc.user_id, u.name AS user_name
+                 FROM user_conversations uc
+                 JOIN users u ON u.id = uc.user_id
+                 WHERE uc.listener_id = $1 AND uc.rating IS NOT NULL AND uc.ended_at IS NOT NULL
+             ) combined
+             ORDER BY created_at DESC
              LIMIT $2 OFFSET $3`,
             [user_id, limit, offset]
         );
