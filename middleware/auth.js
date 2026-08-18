@@ -7,7 +7,7 @@ const auth = async (req, res, next) => {
         const authHeader = req.headers.authorization;
 
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Unauthenticated. Please provide a valid Bearer token.'
             });
@@ -19,7 +19,7 @@ const auth = async (req, res, next) => {
         // Check if token is blacklisted
         const { rows: blacklisted } = await pool.query('SELECT id FROM blacklisted_tokens WHERE token = $1', [token]);
         if (blacklisted.length > 0) {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Unauthenticated. Token has been revoked (logged out).'
             });
@@ -29,7 +29,7 @@ const auth = async (req, res, next) => {
         const { rows: users } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
 
         if (users.length === 0) {
-            return res.status(200).json({ status: false, message: 'User not found.' });
+            return res.status(401).json({ status: false, message: 'User not found.' });
         }
 
         // Remove password from user object
@@ -39,7 +39,7 @@ const auth = async (req, res, next) => {
         req.user = user;
         next();
     } catch (error) {
-        return res.status(200).json({
+        return res.status(401).json({
             status: false,
             message: 'Unauthenticated. Please provide a valid Bearer token.'
         });
@@ -63,7 +63,7 @@ const verifyOtpToken = (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {
-        return res.status(200).json({
+        return res.status(401).json({
             status: false,
             message: 'Token required.'
         });
@@ -76,7 +76,7 @@ const verifyOtpToken = (req, res, next) => {
         req.user = decoded;
         next();
     } catch (err) {
-        return res.status(200).json({
+        return res.status(401).json({
             status: false,
             message: 'Invalid token.'
         });
@@ -88,7 +88,7 @@ const verifyPhoneToken = (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.json({
+        return res.status(401).json({
             status: false,
             message: "Token required."
         });
@@ -101,7 +101,7 @@ const verifyPhoneToken = (req, res, next) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         if (decoded.purpose !== "phone_verification") {
-            return res.json({
+            return res.status(401).json({
                 status: false,
                 message: "Invalid token."
             });
@@ -113,7 +113,7 @@ const verifyPhoneToken = (req, res, next) => {
 
     } catch (err) {
 
-        return res.json({
+        return res.status(401).json({
             status: false,
             message: "Invalid or expired token."
         });

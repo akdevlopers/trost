@@ -417,10 +417,10 @@ router.get('/listener-application/:user_id', async (req, res) => {
         `, [user_id]);
 
         if (listener.length === 0) {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: "Listener not found."
-            }, 200);
+            });
         }
 
         // Languages
@@ -502,10 +502,10 @@ router.post('/listener-reupload', upload.fields([
             );
 
             if (rows.length === 0) {
-                return res.status(200).json({
+                return res.status(401).json({
                     status: false,
                     message: "Listener not found."
-                }, 200);
+                });
             }
 
             const listener = rows[0];
@@ -603,7 +603,7 @@ router.post('/listener/reupload-rejected', auth, upload.fields([
         const user_id = req.user.id;
 
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: "Access denied. Listener permissions required."
             });
@@ -718,7 +718,7 @@ router.get('/profile', auth, async (req, res) => {
             [user_id]
         );
 
-        if (users.length === 0) return res.status(200).json({ status: false, message: 'User not found.' }, 200);
+        if (users.length === 0) return res.status(401).json({ status: false, message: 'User not found.' });
 
         res.status(200).json({ status: true, data: users[0] }, 200);
     } catch (error) {
@@ -834,7 +834,7 @@ router.post('/change-password', auth, async (req, res) => {
 
         const { rows } = await pool.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
         if (rows.length === 0 || !rows[0].password)
-            return res.status(200).json({ status: false, message: 'User not found or no password set.' }, 200);
+            return res.status(401).json({ status: false, message: 'User not found or no password set.' });
 
         const isMatch = await bcrypt.compare(current_password, rows[0].password);
         if (!isMatch)
@@ -952,7 +952,7 @@ router.post('/verify-forgot-otp', async (req, res) => {
 
         const { rows: users } = await pool.query('SELECT id, email_otp, otp_created_at FROM users WHERE email = $1', [email]);
         if (users.length === 0)
-            return res.status(200).json({ status: false, message: 'User not found.' });
+            return res.status(401).json({ status: false, message: 'User not found.' });
 
         if (String(users[0].email_otp) !== String(otp))
             return res.status(200).json({ status: false, message: 'Invalid OTP.' });
@@ -985,18 +985,18 @@ router.post('/reset-password', async (req, res) => {
     try {
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer '))
-            return res.status(200).json({ status: false, message: 'Reset token is required.' });
+            return res.status(401).json({ status: false, message: 'Reset token is required.' });
 
         const token = authHeader.split(' ')[1];
         let decoded;
         try {
             decoded = jwt.verify(token, process.env.JWT_SECRET);
         } catch (_) {
-            return res.status(200).json({ status: false, message: 'Invalid or expired reset token.' });
+            return res.status(401).json({ status: false, message: 'Invalid or expired reset token.' });
         }
 
         if (decoded.type !== 'reset')
-            return res.status(200).json({ status: false, message: 'Invalid token type.' });
+            return res.status(401).json({ status: false, message: 'Invalid token type.' });
 
         const { new_password, confirm_password } = req.body;
         if (!new_password || !confirm_password)
@@ -1030,7 +1030,7 @@ router.post('/delete-account', auth, async (req, res) => {
 
         const { rows } = await pool.query('SELECT password FROM users WHERE id = $1', [user_id]);
         if (rows.length === 0)
-            return res.status(200).json({ status: false, message: 'User not found.' });
+            return res.status(401).json({ status: false, message: 'User not found.' });
 
         const isMatch = await bcrypt.compare(password, rows[0].password);
         if (!isMatch)
@@ -1068,7 +1068,7 @@ router.post('/listener-login', async (req, res) => {
                 [cleanEmail]
             );
             if (users.length === 0) {
-                return res.status(200).json({
+                return res.status(401).json({
                     status: false,
                     message: 'Listener account not found.'
                 });
@@ -1081,7 +1081,7 @@ router.post('/listener-login', async (req, res) => {
                 [cleanPhone]
             );
             if (users.length === 0) {
-                return res.status(200).json({
+                return res.status(401).json({
                     status: false,
                     message: 'Listener account not found.'
                 });
@@ -1189,7 +1189,7 @@ router.post('/listener/dashboard', auth, async (req, res) => {
 
         // Ensure user is listener
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -1425,7 +1425,7 @@ router.post('/listener/calls-queue', auth, async (req, res) => {
 
         // Ensure user is listener
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -1548,7 +1548,7 @@ router.post('/listener/toggle-status', auth, async (req, res) => {
 
         // Ensure user is listener
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -1612,7 +1612,7 @@ const listenerCallHistoryHandler = async (req, res) => {
 
         // Ensure user is listener
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -1830,7 +1830,7 @@ router.post('/listener/reviews', auth, async (req, res) => {
 
         // Ensure user is listener
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -1923,7 +1923,7 @@ router.post('/listener/profile/view', auth, async (req, res) => {
 
         // Ensure user is listener
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -2035,7 +2035,7 @@ router.post('/listener/profile/update', auth, async (req, res) => {
 
         // Ensure user is listener
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -2137,7 +2137,7 @@ router.post('/listener/status', async (req, res) => {
         );
 
         if (rows.length === 0) {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Listener not found.'
             });
@@ -2384,7 +2384,7 @@ const listenerEarningsHandler = async (req, res) => {
         const user_id = req.user.id;
 
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -2461,7 +2461,7 @@ const listenerSettlementsListHandler = async (req, res) => {
         const user_id = req.user.id;
 
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });
@@ -2520,7 +2520,7 @@ const listenerCallEarningsLogsHandler = async (req, res) => {
         const user_id = req.user.id;
 
         if (req.user.user_type !== 'listener') {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'Access denied. Listener permissions required.'
             });

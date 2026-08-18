@@ -83,7 +83,7 @@ router.post('/login', async (req, res) => {
         const { rows: users } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
 
         if (users.length === 0) {
-            return res.status(200).json({ status: false, message: 'Admin not found.' });
+            return res.status(401).json({ status: false, message: 'Admin not found.' });
         }
 
         const user = users[0];
@@ -2790,7 +2790,7 @@ router.post('/logout', auth, role('admin'), async (req, res) => {
         const authHeader = req.headers.authorization;
 
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: "Bearer token is required."
             });
@@ -2824,7 +2824,7 @@ router.post('/logout', auth, role('admin'), async (req, res) => {
 
         console.error('Admin logout error:', error);
 
-        return res.status(200).json({
+        return res.status(401).json({
             status: false,
             message: error.message
         });

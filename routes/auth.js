@@ -509,7 +509,7 @@ router.post('/login', async (req, res) => {
         );
 
         if (users.length === 0) {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: 'User not found.'
             });
@@ -598,7 +598,7 @@ router.post('/phone_login', async (req, res) => {
         );
 
         if (rows.length === 0) {
-            return res.json({
+            return res.status(401).json({
                 status: false,
                 message: "User not found."
             });
@@ -724,7 +724,7 @@ router.post("/verify-phone-otp", verifyPhoneToken, async (req, res) => {
         );
 
         if (rows.length === 0) {
-            return res.json({
+            return res.status(401).json({
                 status: false,
                 message: "User not found."
             });
@@ -834,7 +834,7 @@ router.post('/change-password', auth, async (req, res) => {
         );
 
         if (rows.length === 0) {
-            return res.json({
+            return res.status(401).json({
                 status: false,
                 message: "User not found."
             });
@@ -904,7 +904,7 @@ router.post('/logout', auth, async (req, res) => {
         const authHeader = req.headers.authorization;
 
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: "Bearer token is required."
             });
@@ -996,7 +996,7 @@ router.post('/early-bird', async (req, res) => {
             return res.status(200).json({ status: false, message: 'Name and email are required.' });
         }
         const cleanEmail = email.trim().toLowerCase();
-        
+
         // Send Early Bird Confirmation Email in background
         const { sendEarlyBirdConfirmationEmail } = require('../utils/email');
         sendEarlyBirdConfirmationEmail(cleanEmail, name)

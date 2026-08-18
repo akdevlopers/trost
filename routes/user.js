@@ -2171,7 +2171,7 @@ router.post('/update-name', auth, async (req, res) => {
         );
 
         if (rows.length === 0) {
-            return res.status(200).json({
+            return res.status(401).json({
                 status: false,
                 message: "User not found."
             });
