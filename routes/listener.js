@@ -18,6 +18,7 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
             current_location,
             home_country,
             university_email,
+            phone,
             vibe_id,
             profile_type,
             ready_to_start,
@@ -42,6 +43,22 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
                     }, 200);
                 }
             }
+        }
+
+        if (!phone || phone.trim() === "") {
+            return res.status(200).json({ status: false, message: "Phone number is required." }, 200);
+        }
+
+        const cleanPhone = phone.trim();
+        const { rows: existingPhone } = await pool.query(
+            "SELECT id FROM users WHERE phone = $1 AND email <> $2",
+            [cleanPhone, university_email ? university_email.trim().toLowerCase() : '']
+        );
+        if (existingPhone.length > 0) {
+            return res.status(200).json({
+                status: false,
+                message: "Phone number already exists."
+            }, 200);
         }
 
         if (!bio || bio.trim() === "") {
@@ -172,35 +189,39 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
                 }, 200);
             }
             userId = existingUser.id;
-            // Update existing user including password
+            // Update existing user including password and phone
             await pool.query(
                 `UPDATE users
                 SET
                     name = $1,
                     user_type = 'listener',
-                    password = $2
-                WHERE id = $3`,
+                    password = $2,
+                    phone = $3
+                WHERE id = $4`,
                 [
                     full_name,
                     hashedPassword,
+                    cleanPhone,
                     userId
                 ]
             );
         } else {
-            // Create new user with password
+            // Create new user with password and phone
             const { rows: result } = await pool.query(
                 `INSERT INTO users
                 (
                     name,
                     email,
+                    phone,
                     user_type,
                     email_verified,
                     password
                 )
-                VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+                VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
                 [
                     full_name,
                     university_email,
+                    cleanPhone,
                     'listener',
                     0,
                     hashedPassword
