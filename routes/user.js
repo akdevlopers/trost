@@ -3018,8 +3018,9 @@ router.post('/start-call', auth, async (req, res) => {
         const BASE_URL = `${req.protocol}://${req.get('host')}`;
 
         // Trigger Pusher notification for the listener
+        let pusherResponse = null;
         try {
-            await pusher.trigger(`listener.${parsedListenerId}`, "incoming-call", {
+            pusherResponse = await pusher.trigger(`listener.${parsedListenerId}`, "incoming-call", {
                 caller_name: req.user.name || "",
                 topic: "Voice Call Session",
                 conversation_id: conversation.id,
@@ -3028,6 +3029,7 @@ router.post('/start-call', auth, async (req, res) => {
             });
         } catch (pusherError) {
             console.error("Pusher trigger error:", pusherError);
+            pusherResponse = { error: pusherError.message };
         }
 
         return res.status(200).json({
@@ -3039,6 +3041,7 @@ router.post('/start-call', auth, async (req, res) => {
                 call_status: conversation.status,
                 started_at: conversation.started_at,
                 wallet_remaining_minutes: currentMinutes,
+                pusher_response: pusherResponse,
                 listener: {
                     id: listener.id,
                     name: listener.name,

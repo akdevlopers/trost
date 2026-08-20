@@ -84,6 +84,24 @@ async function initDb() {
             ADD COLUMN IF NOT EXISTS rating NUMERIC(3, 2) DEFAULT 0.00;
         `);
 
+        // 7. Add rating column to listener_details if not present, and set its default to 0.00
+        await pool.query(`
+            ALTER TABLE listener_details 
+            ADD COLUMN IF NOT EXISTS rating NUMERIC(3, 2) DEFAULT 0.00;
+        `);
+        await pool.query(`
+            ALTER TABLE listener_details 
+            ALTER COLUMN rating SET DEFAULT 0.00;
+        `);
+
+        // 8. Initialize any NULL ratings for listeners to 0.00
+        await pool.query(`
+            UPDATE listener_details SET rating = 0.00 WHERE rating IS NULL;
+        `);
+        await pool.query(`
+            UPDATE users SET rating = 0.00 WHERE user_type = 'listener' AND rating IS NULL;
+        `);
+
         console.log('[DB Init] Schema updates verified successfully.');
     } catch (error) {
         console.error('[DB Init] Error during database initialization:', error);
