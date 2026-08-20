@@ -3444,6 +3444,17 @@ const endCallHandler = async (req, res) => {
 
         await client.query("COMMIT");
 
+        // Trigger Pusher notification about ended/cancelled call
+        try {
+            await pusher.trigger(`listener.${listenerId}`, "incoming-call-cancelled", {
+                conversation_id: parsedConvId,
+                status: finalStatus,
+                message: finalStatus === 'cancelled' ? "Call cancelled by user" : "Call completed"
+            });
+        } catch (pusherError) {
+            console.error("Pusher trigger error in end-call:", pusherError);
+        }
+
         return res.status(200).json({
             status: true,
             message: "Call ended successfully and minutes updated.",
