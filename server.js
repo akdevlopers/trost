@@ -24,7 +24,16 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Serve uploaded files statically
+// Serve uploaded files statically (checks local disk first, fallbacks/redirects to AWS S3)
+app.use('/uploads/:filename', (req, res, next) => {
+    const filename = req.params.filename;
+    const localFilePath = path.join(uploadsDir, filename);
+    if (fs.existsSync(localFilePath)) {
+        return res.sendFile(localFilePath);
+    }
+    const s3BaseUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com`;
+    res.redirect(`${s3BaseUrl}/${filename}`);
+});
 app.use('/uploads', express.static(uploadsDir));
 
 // Import routes

@@ -6,14 +6,35 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const upload = require('../middleware/upload');
-const { fileTypeFromFile } = require('file-type'); // npm install file-type
 const fs = require('fs');
 
-// Deletes any files multer already saved to disk before we reject the request
+const { S3Client, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { fileTypeFromFile, fileTypeFromBuffer } = require('file-type');
+
+const s3 = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    }
+});
+
+// Deletes any files multer already saved before we reject the request (works with disk or S3)
 function cleanupUploadedFiles(files) {
     if (!files) return;
-    Object.values(files).flat().forEach(file => {
-        fs.unlink(file.path, () => { });
+    Object.values(files).flat().forEach(async (file) => {
+        if (file.path) {
+            fs.unlink(file.path, () => { });
+        } else if (file.key) {
+            try {
+                await s3.send(new DeleteObjectCommand({
+                    Bucket: file.bucket || process.env.AWS_BUCKET_NAME,
+                    Key: file.key
+                }));
+            } catch (err) {
+                console.error("S3 file cleanup error:", err);
+            }
+        }
     });
 }
 
@@ -23,12 +44,33 @@ function fail(req, res, message) {
     return res.status(200).json({ status: false, message });
 }
 
-// Verifies actual file content (magic bytes), not just extension/mimetype
-async function isActuallyAudio(filePath) {
+// Verifies actual file content (magic bytes), not just extension/mimetype (supports local and S3 paths)
+async function isActuallyAudio(filePathOrUrl) {
     try {
-        const type = await fileTypeFromFile(filePath);
-        if (!type) return false;
-        return type.mime.startsWith('audio/');
+        if (typeof filePathOrUrl === 'string' && filePathOrUrl.startsWith('http')) {
+            const s3BaseUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/`;
+            const key = filePathOrUrl.replace(s3BaseUrl, '');
+            
+            const command = new GetObjectCommand({
+                Bucket: process.env.AWS_BUCKET_NAME,
+                Key: key,
+                Range: 'bytes=0-4096'
+            });
+            const response = await s3.send(command);
+            
+            const streamToBuffer = (stream) => new Promise((resolve, reject) => {
+                const chunks = [];
+                stream.on('data', (chunk) => chunks.push(chunk));
+                stream.on('error', reject);
+                stream.on('end', () => resolve(Buffer.concat(chunks)));
+            });
+            const buffer = await streamToBuffer(response.Body);
+            const type = await fileTypeFromBuffer(buffer);
+            return type && type.mime.startsWith('audio/');
+        } else {
+            const type = await fileTypeFromFile(filePathOrUrl);
+            return type && type.mime.startsWith('audio/');
+        }
     } catch (_) {
         return false;
     }
@@ -691,7 +733,7 @@ router.post('/add-listener', auth, role('admin'), upload.fields([
             if (file.size > maxAudioSize) {
                 return fail(req, res, "Primary voice file must be under 15MB.");
             }
-            const isAudio = await isActuallyAudio(file.path);
+            const isAudio = await isActuallyAudio(file.location || file.path);
             if (!isAudio) {
                 return fail(req, res, "Primary voice must be a genuine audio file.");
             }
@@ -702,7 +744,7 @@ router.post('/add-listener', auth, role('admin'), upload.fields([
             if (file.size > maxAudioSize) {
                 return fail(req, res, "Secondary voice file must be under 15MB.");
             }
-            const isAudio = await isActuallyAudio(file.path);
+            const isAudio = await isActuallyAudio(file.location || file.path);
             if (!isAudio) {
                 return fail(req, res, "Secondary voice must be a genuine audio file.");
             }
