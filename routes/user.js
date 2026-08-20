@@ -2851,6 +2851,25 @@ const makePaymentHandler = async (req, res) => {
             }
         });
 
+        // Track conversion in background
+        try {
+            const { rows: userRows } = await client.query(
+                "SELECT id, name, email, phone, user_type FROM users WHERE id = $1",
+                [user_id]
+            );
+            if (userRows.length > 0) {
+                const { trackConversion } = require('../utils/analytics');
+                trackConversion(req, userRows[0], {
+                    id: paymentResult[0].id,
+                    payment_id: paymentRefId,
+                    package_id: parsedPackageId,
+                    amount: packagePrice
+                }).catch(err => console.error("GA4/Meta conversion tracking failed:", err));
+            }
+        } catch (trackError) {
+            console.error("Failed to query user for conversion tracking:", trackError);
+        }
+
     } catch (error) {
         await client.query("ROLLBACK");
         console.error("Make payment error:", error);

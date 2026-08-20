@@ -465,6 +465,11 @@ router.post('/register', async (req, res) => {
         sendClientWelcomeEmail(registeredUser.email, registeredUser.name)
             .catch(err => console.error("Failed to send welcome email to client:", err));
 
+        // Track Registration & Trial events
+        const { trackRegistration, trackTrial } = require('../utils/analytics');
+        trackRegistration(req, registeredUser).catch(err => console.error("GA4/Meta registration tracking failed:", err));
+        trackTrial(req, registeredUser, 10).catch(err => console.error("GA4/Meta trial tracking failed:", err));
+
         return res.status(200).json({
             status: true,
             message: "Registration successful.",

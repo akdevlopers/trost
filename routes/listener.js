@@ -335,6 +335,21 @@ router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount:
         sendPendingReviewEmail(university_email, full_name)
             .catch(err => console.error("Failed to send pending review email to listener:", err));
 
+        // Track Listener Registration & Voice Submission events
+        const { trackRegistration, trackVoiceSubmission } = require('../utils/analytics');
+        const listenerObj = {
+            id: userId,
+            name: full_name,
+            email: university_email,
+            phone: cleanPhone,
+            user_type: 'listener'
+        };
+        trackRegistration(req, listenerObj).catch(err => console.error("GA4/Meta listener registration tracking failed:", err));
+        trackVoiceSubmission(req, listenerObj, {
+            primary_voice: primaryVoice,
+            secondary_voice: secondaryVoice
+        }).catch(err => console.error("GA4/Meta voice submission tracking failed:", err));
+
         res.status(200).json({
             status: true,
             message: "Listener application submitted successfully."
