@@ -131,8 +131,9 @@ router.post('/login', async (req, res) => {
 // GET /api/admin/get-listeners
 router.get('/get-listeners', auth, role('admin'), async (req, res) => {
     try {
-        const { page, limit, offset } = getPagination(req.query);
-        const { search, application_status, premium_boost, profile_type } = req.query;
+        const mergedParams = { ...req.query, ...req.body };
+        const { page, limit, offset } = getPagination(mergedParams);
+        const { search, status, application_status, premium_boost, profile_type } = mergedParams;
 
         let conditions = [`u.user_type = 'listener'`];
         let params = [];
@@ -144,10 +145,11 @@ router.get('/get-listeners', auth, role('admin'), async (req, res) => {
             params.push(like, like, like, like);
         }
 
-        // application_status filter
-        if (application_status !== undefined && application_status !== '') {
+        // status filter (supports status or application_status)
+        const finalStatus = status !== undefined ? status : application_status;
+        if (finalStatus !== undefined && finalStatus !== '') {
             conditions.push(`ld.application_status = $${params.length + 1}`);
-            params.push(Number(application_status));
+            params.push(Number(finalStatus));
         }
 
         // premium_boost filter
@@ -174,73 +176,48 @@ router.get('/get-listeners', auth, role('admin'), async (req, res) => {
         );
         const total = countRows[0].total;
 
-        // Fetch page
-        // const { rows: listeners } = await pool.query(
-        //     `SELECT
-        //          u.id,
-        //             u.name,
-        //             u.email,
-        //             u.phone,
-        //             u.profile_photo,
+        // Get total counts for each status respecting other filters (search, premium_boost, profile_type)
+        let conditionsCounts = [`u.user_type = 'listener'`];
+        let paramsCounts = [];
 
-        //             ld.current_location,
-        //             ld.home_country,
-        //             ld.university_email,
+        // Search filter
+        if (search && search.trim()) {
+            const like = `%${search.trim()}%`;
+            conditionsCounts.push(`(u.name LIKE $${paramsCounts.length + 1} OR u.email LIKE $${paramsCounts.length + 2} OR ld.home_country LIKE $${paramsCounts.length + 3} OR ld.university_email LIKE $${paramsCounts.length + 4})`);
+            paramsCounts.push(like, like, like, like);
+        }
 
-        //             v.vibe_name AS vibe,
+        // premium_boost filter
+        if (premium_boost !== undefined && premium_boost !== '') {
+            conditionsCounts.push(`ld.premium_boost = $${paramsCounts.length + 1}`);
+            paramsCounts.push(Number(premium_boost));
+        }
 
-        //             STRING_AGG(DISTINCT i.interest_name, ', ') AS interests,
+        // profile_type filter
+        if (profile_type && profile_type.trim()) {
+            conditionsCounts.push(`ld.profile_type = $${paramsCounts.length + 1}`);
+            paramsCounts.push(profile_type.trim());
+        }
 
-        //             ld.profile_type,
-        //             ld.primary_voice,
-        //             ld.secondary_voice,
-        //             ld.ready_to_start,
-        //             ld.premium_boost,
-        //             ld.code_of_conduct_agreed,
-        //             ld.application_status,
-        //             ld.profile_photo_status,
-        //             ld.primary_voice_status,
-        //             ld.secondary_voice_status
+        const WHERE_COUNTS = `WHERE ` + conditionsCounts.join(' AND ');
 
-        //         FROM users u
-
-        //         JOIN listener_details ld
-        //             ON u.id = ld.user_id
-
-        //         LEFT JOIN vibes v
-        //             ON ld.vibe_id = v.id
-
-        //         LEFT JOIN listener_interests li
-        //             ON li.user_id = u.id
-
-        //         LEFT JOIN interests i
-        //             ON li.interest_id = i.id
-
-        //         ${WHERE}
-
-        //         GROUP BY
-        //             u.id,
-        //             ld.user_id,
-        //             v.vibe_name
-
-        //         ORDER BY u.id DESC
-
-        //         LIMIT $${params.length + 1}
-        //         OFFSET $${params.length + 2}`,
-        //     // `SELECT
-        //     //     u.id, u.name, u.email, u.phone, u.profile_photo,
-        //     //     ld.current_location, ld.home_country, ld.university_email, ld.interests,
-        //     //     ld.profile_type, ld.primary_voice, ld.secondary_voice,
-        //     //     ld.ready_to_start, ld.premium_boost, ld.code_of_conduct_agreed,
-        //     //     ld.application_status, ld.profile_photo_status, ld.primary_voice_status, ld.secondary_voice_status
-        //     //  FROM users u
-        //     //  JOIN listener_details ld ON u.id = ld.user_id
-        //     //  ${WHERE}
-        //     //  ORDER BY u.id DESC
-        //     //  LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-
-        //     [...params, limit, offset]
-        // );
+        const { rows: statusCountRows } = await pool.query(
+            `SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE ld.application_status = 1) AS pending,
+                COUNT(*) FILTER (WHERE ld.application_status = 2) AS approved,
+                COUNT(*) FILTER (WHERE ld.application_status = 3) AS rejected
+             FROM users u
+             JOIN listener_details ld ON u.id = ld.user_id
+             ${WHERE_COUNTS}`,
+            paramsCounts
+        );
+        const statusCounts = {
+            total: Number(statusCountRows[0].total || 0),
+            pending: Number(statusCountRows[0].pending || 0),
+            approved: Number(statusCountRows[0].approved || 0),
+            rejected: Number(statusCountRows[0].rejected || 0)
+        };
 
         const { rows: listeners } = await pool.query(
             `SELECT
@@ -308,6 +285,7 @@ router.get('/get-listeners', auth, role('admin'), async (req, res) => {
             status: true,
             message: 'Listeners fetched successfully.',
             data: listeners,
+            counts: statusCounts,
             pagination: {
                 total,
                 page,
