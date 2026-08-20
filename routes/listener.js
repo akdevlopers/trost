@@ -8,6 +8,15 @@ const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const upload = require('../middleware/upload');
 const { sendOtpEmail } = require('../utils/email');
+const Pusher = require('pusher');
+
+const pusher = new Pusher({
+    appId: process.env.PUSHER_APP_ID,
+    key: process.env.PUSHER_KEY,
+    secret: process.env.PUSHER_SECRET,
+    cluster: process.env.PUSHER_CLUSTER,
+    useTLS: true
+});
 
 // POST /api/apply-listener 
 router.post('/apply-listener', upload.fields([{ name: 'profile_photo', maxCount: 1 }, { name: 'primary_voice', maxCount: 1 }, { name: 'secondary_voice', maxCount: 1 }]), async (req, res) => {
@@ -2412,7 +2421,40 @@ router.post('/listener/attend-call', auth, listenerAttendCallHandler);
 
 // POST /api/listener/end-call
 const { endCallHandler } = require('./user');
-router.post('/listener/end-call', auth, endCallHandler);
+router.post('/listener/end-call', auth, async (req, res) => {
+    try {
+        const { conversation_id, call_id } = req.body ?? {};
+        const convId = conversation_id || call_id;
+        
+        let callerUserId = null;
+        if (convId) {
+            const { rows } = await pool.query(
+                "SELECT user_id FROM user_conversations WHERE id = $1",
+                [Number(convId)]
+            );
+            if (rows.length > 0) {
+                callerUserId = rows[0].user_id;
+            }
+        }
+
+        // Trigger Pusher notification to caller
+        if (callerUserId) {
+            try {
+                await pusher.trigger(`user.${callerUserId}`, "listener-end-call", {
+                    conversation_id: Number(convId),
+                    message: "Listener ended the call"
+                });
+            } catch (pusherError) {
+                console.error("Pusher trigger error in listener end-call:", pusherError);
+            }
+        }
+        
+        await endCallHandler(req, res);
+    } catch (err) {
+        console.error("Error in listener end-call wrapper:", err);
+        await endCallHandler(req, res);
+    }
+});
 
 // GET & POST /api/listener/earnings
 const listenerEarningsHandler = async (req, res) => {
