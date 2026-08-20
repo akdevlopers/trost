@@ -4066,6 +4066,63 @@ router.post('/set-listener-rate', auth, role('admin'), async (req, res) => {
     }
 });
 
+// POST /api/admin/listener-unsettled-amount
+// Show unsettled amount of the listener
+// Body: { listener_id }
+router.post('/listener-unsettled-amount', auth, role('admin'), async (req, res) => {
+    try {
+        const { listener_id } = req.body;
+
+        if (!listener_id) {
+            return res.status(200).json({
+                status: false,
+                message: 'listener_id is required.'
+            });
+        }
+
+        const parsedListenerId = Number(listener_id);
+        if (isNaN(parsedListenerId)) {
+            return res.status(200).json({
+                status: false,
+                message: 'Invalid listener_id.'
+            });
+        }
+
+        const { rows } = await pool.query(
+            `SELECT u.id, u.name, u.email, 
+                    COALESCE(ld.unsettled_amount, 0.00) AS unsettled_amount,
+                    COALESCE(ld.settled_amount, 0.00) AS settled_amount
+             FROM users u
+             JOIN listener_details ld ON u.id = ld.user_id
+             WHERE u.id = $1 AND u.user_type = 'listener'`,
+            [parsedListenerId]
+        );
+
+        if (rows.length === 0) {
+            return res.status(200).json({
+                status: false,
+                message: 'Listener not found.'
+            });
+        }
+
+        const listener = rows[0];
+        res.status(200).json({
+            status: true,
+            message: 'Listener unsettled amount retrieved successfully.',
+            data: {
+                listener_id: listener.id,
+                name: listener.name,
+                email: listener.email,
+                unsettled_amount: listener.unsettled_amount,
+                settled_amount: listener.settled_amount
+            }
+        });
+    } catch (error) {
+        console.error('Get listener unsettled amount error:', error);
+        res.status(200).json({ status: false, message: error.message });
+    }
+});
+
 // POST /api/admin/settle-listener
 // Settle listener's unsettled amount (partial or full)
 // Body: { listener_id, amount (optional - defaults to all unsettled), note, payment_method, transaction_ref }
